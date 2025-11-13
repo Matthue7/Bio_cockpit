@@ -21,10 +21,12 @@ import {
 } from '@/libs/live-video-processor'
 import { datalogger } from '@/libs/sensors-logging'
 import { isEqual, sleep } from '@/libs/utils'
+import { QSensorClient } from '@/libs/qsensor-client'
 import { tempVideoStorage, videoStorage } from '@/libs/videoStorage'
 import type { Stream } from '@/libs/webrtc/signalling_protocol'
 import { useMainVehicleStore } from '@/stores/mainVehicle'
 import { useMissionStore } from '@/stores/mission'
+import { useQSensorStore } from '@/stores/qsensor'
 import { Alert, AlertLevel } from '@/types/alert'
 import {
   type DownloadProgressCallback,
@@ -305,6 +307,33 @@ export const useVideoStore = defineStore('video', () => {
 
     activeStreams.value[streamName]!.timeRecordingStart = undefined
 
+    // [NEW] Stop Q-Sensor recording and mirroring
+    if (window.electronAPI?.stopQSensorMirror) {
+      const qsensorStore = useQSensorStore()
+
+      if (qsensorStore.currentSessionId) {
+        // Stop mirroring (fire-and-forget)
+        void qsensorStore.stop().catch((error) => {
+          console.warn('[Q-Sensor] Error stopping mirroring:', error)
+        })
+
+        // Stop recording on ROV (best-effort, fire-and-forget)
+        const mainVehicleStore = useMainVehicleStore()
+        const vehicleAddress = mainVehicleStore.mainVehicle?.hostname || 'blueos.local'
+        const client = new QSensorClient(`http://${vehicleAddress}:9150`)
+        void client.stopRecord(qsensorStore.currentSessionId)
+          .then(() => {
+            console.log(`[Q-Sensor] Recording stopped: ${qsensorStore.currentSessionId}`)
+          })
+          .catch((error) => {
+            console.warn('[Q-Sensor] Failed to stop recording on ROV:', error)
+          })
+
+        // Reset store
+        qsensorStore.reset()
+      }
+    }
+
     activeStreams.value[streamName]!.mediaRecorder!.stop()
 
     alertStore.pushAlert(new Alert(AlertLevel.Success, `Stopped recording stream ${streamName}.`))
@@ -414,6 +443,38 @@ export const useVideoStore = defineStore('video', () => {
     }
 
     activeStreams.value[streamName]!.mediaRecorder!.start(1000)
+
+    // [NEW] Start Q-Sensor recording and mirroring
+    if (window.electronAPI?.startQSensorMirror) {
+      try {
+        const qsensorStore = useQSensorStore()
+        const mainVehicleStore = useMainVehicleStore()
+        const missionStore = useMissionStore()
+
+        // Attempt to get vehicle address from main vehicle store
+        const vehicleAddress = mainVehicleStore.mainVehicle?.hostname || 'blueos.local'
+        const missionName = missionStore.missionName || 'Cockpit'
+
+        // Start recording on ROV
+        const client = new QSensorClient(`http://${vehicleAddress}:9150`)
+        const recordResponse = await client.startRecord({
+          rate_hz: 500,
+          mission: missionName,
+          roll_interval_s: 60,
+        })
+
+        console.log(`[Q-Sensor] Recording started: session_id=${recordResponse.session_id}`)
+
+        // Arm store and start mirroring
+        qsensorStore.arm(recordResponse.session_id, missionName, vehicleAddress)
+        await qsensorStore.start()
+
+        console.log(`[Q-Sensor] Mirroring started for session ${recordResponse.session_id}`)
+      } catch (error) {
+        // Q-Sensor unavailable - log and continue with video only
+        console.warn('[Q-Sensor] Failed to start recording (sensor may be offline):', error)
+      }
+    }
 
     // Initialize live processor if enabled and on Electron
     if (enableLiveProcessing.value && window.electronAPI) {

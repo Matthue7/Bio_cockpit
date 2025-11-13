@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import Store from 'electron-store'
 
 const electronStoreSchema = {
@@ -17,6 +18,9 @@ const electronStoreSchema = {
         type: 'number',
       },
     },
+  },
+  qsensorStoragePath: {
+    type: 'string',
   },
 }
 
@@ -48,8 +52,45 @@ export interface ElectronStoreSchema {
          */
         y: number
       }
+  /**
+   * Q-Sensor storage base path (for mirrored chunks)
+   */
+  qsensorStoragePath?: string
 }
 
-const store = new Store<ElectronStoreSchema>({ schema: electronStoreSchema })
+let storeInstance: Store<ElectronStoreSchema> | null = null
+
+/**
+ * Get the config store instance (lazy initialization after app ready).
+ */
+function getStore(): Store<ElectronStoreSchema> {
+  if (!storeInstance) {
+    storeInstance = new Store<ElectronStoreSchema>({
+      projectName: app.getName() || 'Cockpit',
+      cwd: app.getPath('userData'),
+      name: 'config',
+      schema: electronStoreSchema,
+    })
+  }
+  return storeInstance
+}
+
+// Export a proxy that intercepts ALL property accesses
+const store = new Proxy({} as Store<ElectronStoreSchema>, {
+  get(_target, prop, receiver) {
+    const store = getStore()
+    const value = (store as any)[prop]
+    // Bind methods to the store instance
+    if (typeof value === 'function') {
+      return value.bind(store)
+    }
+    return value
+  },
+  set(_target, prop, value) {
+    const store = getStore()
+    ;(store as any)[prop] = value
+    return true
+  },
+})
 
 export default store

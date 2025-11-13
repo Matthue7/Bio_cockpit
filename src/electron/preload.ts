@@ -78,6 +78,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   systemLog: (level: string, message: string) => ipcRenderer.send('system-log', { level, message }),
   getElectronLogs: () => ipcRenderer.invoke('get-electron-logs'),
+  // Q-Sensor control (bypasses CORS)
+  qsensorConnect: (baseUrl: string, port: string, baud: number) =>
+    ipcRenderer.invoke('qsensor:connect', baseUrl, port, baud),
+  qsensorDisconnect: (baseUrl: string) => ipcRenderer.invoke('qsensor:disconnect', baseUrl),
+  qsensorGetHealth: (baseUrl: string) => ipcRenderer.invoke('qsensor:get-health', baseUrl),
+  qsensorStartAcquisition: (baseUrl: string, pollHz?: number) =>
+    ipcRenderer.invoke('qsensor:start-acquisition', baseUrl, pollHz),
+  qsensorStopAcquisition: (baseUrl: string) => ipcRenderer.invoke('qsensor:stop-acquisition', baseUrl),
+  qsensorStartRecording: (baseUrl: string, options: any) =>
+    ipcRenderer.invoke('qsensor:start-recording', baseUrl, options),
+  qsensorStopRecording: (baseUrl: string, sessionId: string) =>
+    ipcRenderer.invoke('qsensor:stop-recording', baseUrl, sessionId),
+  // Q-Sensor mirroring
+  startQSensorMirror: (sessionId: string, vehicleAddress: string, missionName: string, cadenceSec: number, fullBandwidth: boolean) =>
+    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth),
+  stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
+  getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
+  // Q-Sensor storage path
+  selectQSensorStorageDirectory: () => ipcRenderer.invoke('select-qsensor-storage-directory'),
+  getQSensorStoragePath: () => ipcRenderer.invoke('get-qsensor-storage-path'),
+  setQSensorStoragePath: (storagePath: string) => ipcRenderer.invoke('set-qsensor-storage-path', storagePath),
   getElectronLogContent: (logName: string) => ipcRenderer.invoke('get-electron-log-content', logName),
   deleteElectronLog: (logName: string) => ipcRenderer.invoke('delete-electron-log', logName),
   deleteOldElectronLogs: () => ipcRenderer.invoke('delete-old-electron-logs'),

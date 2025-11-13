@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, screen } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, screen } from 'electron'
 import { join } from 'path'
 
 import { setupAutoUpdater } from './services/auto-update'
@@ -13,6 +13,8 @@ import { setupSystemInfoService } from './services/system-info'
 import { setupUserAgentService } from './services/user-agent'
 import { setupVideoRecordingService } from './services/video-recording'
 import { setupWorkspaceService } from './services/workspace'
+import { setupQSensorMirrorService } from './services/qsensor-mirror'
+import { setupQSensorControlService } from './services/qsensor-control'
 
 // Setup the logger service as soon as possible to avoid different behaviors across runtime
 setupElectronLogService()
@@ -88,6 +90,25 @@ setupUserAgentService()
 setupWorkspaceService()
 setupJoystickMonitoring()
 setupVideoRecordingService()
+setupQSensorMirrorService()
+setupQSensorControlService()
+
+// Q-Sensor storage path IPC handlers
+ipcMain.handle('select-qsensor-storage-directory', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Select Q-Sensor Storage Folder',
+  })
+  return result.filePaths[0] || null
+})
+
+ipcMain.handle('get-qsensor-storage-path', () => {
+  return store.get('qsensorStoragePath') || join(app.getPath('userData'), 'qsensor')
+})
+
+ipcMain.handle('set-qsensor-storage-path', (_event, storagePath: string) => {
+  store.set('qsensorStoragePath', storagePath)
+})
 
 app.whenReady().then(async () => {
   console.log('Electron app is ready.')

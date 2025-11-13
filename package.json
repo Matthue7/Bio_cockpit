@@ -204,5 +204,6 @@
     },
     "buildDependenciesFromSource": false,
     "npmRebuild": false
-  }
+  },
+  "packageManager": "yarn@1.22.19"
 }
