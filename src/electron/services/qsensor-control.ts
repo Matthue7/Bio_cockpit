@@ -10,24 +10,42 @@ import { ipcMain } from 'electron'
 /**
  * Make a fetch request from Electron main (bypasses CORS)
  */
-async function fetchFromMain(url: string, options: RequestInit = {}): Promise<any> {
+async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: string): Promise<any> {
   const method = options.method || 'GET'
+  const startTime = Date.now()
+  const prefix = corrId ? `[QSensor][${corrId}]` : '[QSensor]'
 
   try {
-    console.log(`[QSensor][HTTP] ${method} ${url}`)
+    // Log request details
+    console.log(`${prefix}[DEBUG] ${method} ${url}`)
+    if (options.body) {
+      const bodyPreview = typeof options.body === 'string' ? options.body.substring(0, 500) : '[Binary]'
+      console.log(`${prefix}[DEBUG]   Body: ${bodyPreview}`)
+    }
+    if (options.signal) {
+      console.log(`${prefix}[DEBUG]   Timeout: ${(options.signal as any).timeout || 'default'}ms`)
+    }
+
     const response = await fetch(url, options)
-    console.log(`[QSensor][HTTP] ${method} ${url} → ${response.status} ${response.statusText}`)
+    const elapsed = Date.now() - startTime
+
+    // Log response details
+    console.log(`${prefix}[HTTP] ${method} ${url} → ${response.status} ${response.statusText} (${elapsed}ms)`)
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: response.statusText }))
       const errorMsg = error.detail || response.statusText
-      console.error(`[QSensor][HTTP] ${method} ${url} ERROR: ${errorMsg}`)
+      console.error(`${prefix}[HTTP] ${method} ${url} ERROR: ${errorMsg}`)
+      console.error(`${prefix}[HTTP]   Full error:`, JSON.stringify(error).substring(0, 500))
       throw new Error(errorMsg)
     }
 
-    return await response.json()
+    const data = await response.json()
+    console.log(`${prefix}[HTTP]   Response:`, JSON.stringify(data).substring(0, 500))
+    return data
   } catch (error: any) {
-    console.error(`[QSensor][HTTP] ${method} ${url} FAILED: ${error.message}`)
+    const elapsed = Date.now() - startTime
+    console.error(`${prefix}[HTTP] ${method} ${url} FAILED: ${error.message} (${elapsed}ms)`)
     throw new Error(error.message || 'Request failed')
   }
 }
@@ -113,6 +131,8 @@ async function startAcquisition(
     if (pollHz !== undefined) {
       url.searchParams.set('poll_hz', String(pollHz))
     }
+    // CRITICAL: Disable auto_record so /record/start can manage the chunked recorder
+    url.searchParams.set('auto_record', 'false')
 
     // Increased to 15s - acquisition start can be slow (serial config, auto-record setup)
     const data = await fetchFromMain(url.toString(), {
@@ -193,11 +213,12 @@ async function stopRecording(baseUrl: string, sessionId: string): Promise<{ succ
     // Robust URL construction - handles trailing slashes correctly
     const url = new URL('/record/stop', baseUrl)
 
+    // Increased timeout from 5s to 30s - /record/stop finalizes chunks, computes SHA256, writes manifest
     const data = await fetchFromMain(url.toString(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId }),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(30000),
     })
 
     console.log('[QSensor Control] Recording stopped:', data)

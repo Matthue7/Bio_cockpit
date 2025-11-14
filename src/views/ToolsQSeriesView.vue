@@ -449,6 +449,9 @@ async function handleStartRecording() {
     }
     addLog('info', 'Acquisition started (freerun)')
 
+    // STEP 1.5: Brief delay for state transition (100ms)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
     // STEP 2: Start recording session on API
     addLog('info', 'Starting recording session...')
     const recordResult = await window.electronAPI.qsensorStartRecording(apiBaseUrl.value, {

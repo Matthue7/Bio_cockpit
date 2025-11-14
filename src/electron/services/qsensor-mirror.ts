@@ -90,26 +90,33 @@ async function downloadChunk(
   const tmpPath = path.join(targetDir, `${chunkName}.tmp`)
 
   try {
+    console.log(`[QSensor Mirror] Downloading ${url} -> ${tmpPath}`)
+
     // Download to temp file
     const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
     if (!response.ok) {
+      console.error(`[QSensor Mirror] Download failed: HTTP ${response.status} ${response.statusText}`)
       return { success: false, bytes: 0, error: `HTTP ${response.status}` }
     }
 
     const arrayBuffer = await response.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
+    console.log(`[QSensor Mirror] Received ${buffer.length} bytes, writing to ${tmpPath}`)
 
     await fs.writeFile(tmpPath, buffer)
 
     // Verify SHA256
     const actualSha256 = await computeSHA256(tmpPath)
     if (actualSha256 !== expectedSha256) {
+      console.error(`[QSensor Mirror] SHA256 mismatch: expected=${expectedSha256.substring(0, 8)}..., actual=${actualSha256.substring(0, 8)}...`)
       await fs.unlink(tmpPath) // Clean up
       return { success: false, bytes: 0, error: 'SHA256 mismatch' }
     }
+    console.log(`[QSensor Mirror] SHA256 verified: ${actualSha256.substring(0, 8)}...`)
 
     // Atomic rename
     await fs.rename(tmpPath, targetPath)
+    console.log(`[QSensor Mirror] Renamed ${tmpPath} -> ${targetPath}`)
 
     return { success: true, bytes: buffer.length }
   } catch (error: any) {
@@ -128,24 +135,32 @@ async function downloadChunk(
  * Poll for new chunks and mirror them.
  */
 async function pollAndMirror(session: MirrorSession): Promise<void> {
-  if (!session.running) return
+  if (!session.running) {
+    console.log(`[QSensor Mirror] pollAndMirror() skipped: session ${session.sessionId} not running`)
+    return
+  }
 
   try {
     // Get snapshots list
     const url = `http://${session.vehicleAddress}:9150/record/snapshots?session_id=${session.sessionId}`
-    const response = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    console.log(`[QSensor Mirror] Polling ${url}...`)
+
+    // Increased timeout from 5s to 15s - Pi can be slow when finalizing chunks
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
 
     if (!response.ok) {
-      console.warn(`[QSensor Mirror] Snapshots failed: ${response.status}`)
+      console.warn(`[QSensor Mirror] Snapshots request failed: HTTP ${response.status} ${response.statusText}`)
       return
     }
 
     const chunks = await response.json()
+    console.log(`[QSensor Mirror] Received ${chunks.length} total chunks, lastChunkIndex=${session.lastChunkIndex}`)
 
     // Find new chunks
     const newChunks = chunks.filter((chunk: any) => chunk.index > session.lastChunkIndex)
 
     if (newChunks.length === 0) {
+      console.log(`[QSensor Mirror] No new chunks (have up to index ${session.lastChunkIndex})`)
       return // No new data
     }
 
@@ -153,6 +168,8 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 
     // Download each new chunk
     for (const chunk of newChunks) {
+      console.log(`[QSensor Mirror] Attempting to download chunk ${chunk.index}: ${chunk.name} (${chunk.size_bytes} bytes, sha256=${chunk.sha256?.substring(0, 8)}...)`)
+
       const result = await downloadChunk(
         session.vehicleAddress,
         session.sessionId,
@@ -166,17 +183,19 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
         session.bytesMirrored += result.bytes
         session.lastSync = new Date().toISOString()
 
-        console.log(`[QSensor Mirror] Downloaded chunk ${chunk.name}: ${result.bytes} bytes`)
+        console.log(`[QSensor Mirror] ✓ Downloaded chunk ${chunk.name}: ${result.bytes} bytes (total mirrored: ${session.bytesMirrored})`)
       } else {
-        console.error(`[QSensor Mirror] Failed to download ${chunk.name}: ${result.error}`)
+        console.error(`[QSensor Mirror] ✗ Failed to download ${chunk.name}: ${result.error}`)
         // Continue with other chunks
       }
     }
 
     // Update metadata
+    console.log(`[QSensor Mirror] Writing mirror.json: lastChunk=${session.lastChunkIndex}, bytes=${session.bytesMirrored}`)
     await writeMirrorMetadata(session)
+    console.log(`[QSensor Mirror] Poll complete for session ${session.sessionId}`)
   } catch (error: any) {
-    console.error(`[QSensor Mirror] Poll error:`, error.message)
+    console.error(`[QSensor Mirror] Poll error for session ${session.sessionId}:`, error.message, error.stack)
   }
 }
 
@@ -191,8 +210,11 @@ export async function startMirrorSession(
   fullBandwidth: boolean
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, vehicle=${vehicleAddress}, mission=${missionName}`)
+
     // Check if already running
     if (activeSessions.has(sessionId)) {
+      console.warn(`[QSensor Mirror] Session ${sessionId} already active`)
       return { success: false, error: 'Session already active' }
     }
 
@@ -201,11 +223,15 @@ export async function startMirrorSession(
     const basePath = customStoragePath || path.join(app.getPath('userData'), 'qsensor')
     const rootPath = path.join(basePath, missionName, sessionId)
 
+    console.log(`[QSensor Mirror] Storage path resolved: customPath=${customStoragePath || 'none'}, basePath=${basePath}, rootPath=${rootPath}`)
+
     // Create directory
     await fs.mkdir(rootPath, { recursive: true })
+    console.log(`[QSensor Mirror] Created directory: ${rootPath}`)
 
     // Load existing metadata if resuming
     const existing = await loadMirrorMetadata(rootPath)
+    console.log(`[QSensor Mirror] Loaded metadata: lastChunk=${existing?.lastChunkIndex ?? -1}, bytes=${existing?.bytesMirrored ?? 0}`)
 
     const session: MirrorSession = {
       sessionId,
@@ -222,11 +248,23 @@ export async function startMirrorSession(
     }
 
     activeSessions.set(sessionId, session)
+    console.log(`[QSensor Mirror] Session ${sessionId} added to active sessions map`)
 
-    // Start polling
-    const poll = () => pollAndMirror(session)
-    poll() // Run immediately
-    session.intervalId = setInterval(poll, session.cadenceSec * 1000)
+    // Log the URL that will be polled
+    const snapshotsUrl = `http://${session.vehicleAddress}:9150/record/snapshots?session_id=${session.sessionId}`
+    console.log(`[QSensor Mirror] Will poll: ${snapshotsUrl} every ${session.cadenceSec}s`)
+
+    // Start polling - wrap in try-catch to catch any immediate errors
+    try {
+      const poll = () => pollAndMirror(session)
+      console.log(`[QSensor Mirror] Running initial poll...`)
+      poll() // Run immediately
+      session.intervalId = setInterval(poll, session.cadenceSec * 1000)
+      console.log(`[QSensor Mirror] Polling interval ${session.intervalId} started (cadence=${session.cadenceSec}s)`)
+    } catch (pollError: any) {
+      console.error(`[QSensor Mirror] Failed to start polling:`, pollError)
+      throw pollError
+    }
 
     console.log(
       `[QSensor Mirror] Started session ${sessionId}: cadence=${session.cadenceSec}s, path=${rootPath}`
@@ -305,9 +343,17 @@ export function getSessionStats(
  * Setup IPC handlers for Q-Sensor mirroring.
  */
 export function setupQSensorMirrorService(): void {
-  ipcMain.handle('qsensor:start-mirror', async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth) => {
-    return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth)
-  })
+  ipcMain.handle(
+    'qsensor:start-mirror',
+    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth) => {
+      console.log(
+        `[QSensor Mirror] IPC start request: session=${sessionId}, vehicle=${vehicleAddress}, cadence=${
+          fullBandwidth ? 2 : cadenceSec
+        }s, fullBandwidth=${fullBandwidth}`
+      )
+      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth)
+    }
+  )
 
   ipcMain.handle('qsensor:stop-mirror', async (_event, sessionId) => {
     return await stopMirrorSession(sessionId)

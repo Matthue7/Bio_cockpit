@@ -46,6 +46,10 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
 
     try {
+      window.electronAPI?.systemLog(
+        'info',
+        `[QSensor Store] start() requested for session ${currentSessionId.value} (vehicle=${vehicleAddress.value}, cadence=${fullBandwidth.value ? 2 : cadenceSec.value}s)`
+      )
       const result = await window.electronAPI.startQSensorMirror(
         currentSessionId.value,
         vehicleAddress.value,
@@ -57,13 +61,25 @@ export const useQSensorStore = defineStore('qsensor', () => {
       if (result.success) {
         isRecording.value = true
         lastError.value = null
+        window.electronAPI?.systemLog(
+          'info',
+          `[QSensor Store] Mirroring started for session ${currentSessionId.value} (bytes=${bytesMirrored.value})`
+        )
       } else {
         lastError.value = result.error || 'Unknown error'
+        window.electronAPI?.systemLog(
+          'error',
+          `[QSensor Store] Mirroring failed to start for session ${currentSessionId.value}: ${lastError.value}`
+        )
       }
 
       return result
     } catch (error: any) {
       lastError.value = error.message
+      window.electronAPI?.systemLog(
+        'error',
+        `[QSensor Store] start() threw for session ${currentSessionId.value}: ${error.message}`
+      )
       return { success: false, error: error.message }
     }
   }
