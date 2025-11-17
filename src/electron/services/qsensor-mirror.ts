@@ -278,7 +278,209 @@ export async function startMirrorSession(
 }
 
 /**
+ * Verify session.csv file integrity after combining.
+ *
+ * Checks that the combined file has the expected number of rows and valid CSV structure.
+ */
+async function verifySessionFile(sessionCsvPath: string, expectedRows: number): Promise<{ valid: boolean; actualRows: number; error?: string }> {
+  try {
+    console.log(`[QSensor Mirror] Verifying ${sessionCsvPath}...`)
+
+    // Check file exists and get size
+    const stats = await fs.stat(sessionCsvPath)
+    console.log(`[QSensor Mirror] Session file size: ${stats.size} bytes`)
+
+    if (stats.size === 0) {
+      return { valid: false, actualRows: 0, error: 'Session file is empty' }
+    }
+
+    // Read and count lines (more efficient than split for large files)
+    const content = await fs.readFile(sessionCsvPath, 'utf-8')
+    const lines = content.split('\n')
+
+    // Count non-empty lines
+    let actualRows = 0
+    let hasHeader = false
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (line === '') continue
+
+      if (i === 0 || !hasHeader) {
+        // First non-empty line should be header
+        if (line.includes('timestamp') || line.includes('sensor_id')) {
+          hasHeader = true
+          continue
+        }
+      }
+
+      actualRows++
+    }
+
+    console.log(`[QSensor Mirror] Verification: expected=${expectedRows} rows, actual=${actualRows} rows`)
+
+    if (!hasHeader) {
+      return { valid: false, actualRows, error: 'Missing CSV header' }
+    }
+
+    if (actualRows !== expectedRows) {
+      return {
+        valid: false,
+        actualRows,
+        error: `Row count mismatch: expected ${expectedRows}, got ${actualRows}`
+      }
+    }
+
+    console.log(`[QSensor Mirror] ✓ Session file verified successfully`)
+    return { valid: true, actualRows }
+
+  } catch (error: any) {
+    console.error(`[QSensor Mirror] Verification failed:`, error)
+    return { valid: false, actualRows: 0, error: error.message }
+  }
+}
+
+/**
+ * Clean up redundant chunk files after successful session.csv creation.
+ *
+ * Only deletes chunks after verifying session.csv integrity.
+ * Keeps mirror.json and session.csv.
+ */
+async function cleanupChunkFiles(session: MirrorSession): Promise<{ deleted: number; errors: number }> {
+  let deleted = 0
+  let errors = 0
+
+  try {
+    console.log(`[QSensor Mirror] Cleaning up chunk files in ${session.rootPath}...`)
+
+    const files = await fs.readdir(session.rootPath)
+    const chunkFiles = files
+      .filter(name => name.match(/^chunk_\d{5}\.csv$/))
+      .sort()
+
+    console.log(`[QSensor Mirror] Found ${chunkFiles.length} chunk files to clean up`)
+
+    for (const chunkFile of chunkFiles) {
+      try {
+        const chunkPath = path.join(session.rootPath, chunkFile)
+        await fs.unlink(chunkPath)
+        deleted++
+        console.log(`[QSensor Mirror] ✓ Deleted ${chunkFile}`)
+      } catch (err: any) {
+        errors++
+        console.warn(`[QSensor Mirror] ✗ Failed to delete ${chunkFile}: ${err.message}`)
+        // Continue cleanup even if one file fails
+      }
+    }
+
+    console.log(`[QSensor Mirror] Cleanup complete: deleted=${deleted}, errors=${errors}`)
+    return { deleted, errors }
+
+  } catch (error: any) {
+    console.error(`[QSensor Mirror] Cleanup failed:`, error)
+    return { deleted, errors: errors + 1 }
+  }
+}
+
+/**
+ * Combine all chunk CSV files into a single continuous session.csv file.
+ *
+ * Reads chunks in order (by index), writes header once, then appends all data rows.
+ * Uses streaming line-by-line processing to avoid loading entire dataset into memory.
+ */
+async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{ success: boolean; rowsWritten: number; error?: string }> {
+  const sessionCsvPath = path.join(session.rootPath, 'session.csv')
+  const sessionCsvTmpPath = path.join(session.rootPath, 'session.csv.tmp')
+
+  try {
+    console.log(`[QSensor Mirror] Combining chunks into ${sessionCsvPath}...`)
+
+    // Get list of all chunk files in directory
+    const files = await fs.readdir(session.rootPath)
+    const chunkFiles = files
+      .filter(name => name.match(/^chunk_\d{5}\.csv$/))
+      .sort() // Sort by name ensures correct order (chunk_00000, chunk_00001, ...)
+
+    if (chunkFiles.length === 0) {
+      console.warn(`[QSensor Mirror] No chunk files found in ${session.rootPath}`)
+      return { success: false, rowsWritten: 0, error: 'No chunk files found' }
+    }
+
+    console.log(`[QSensor Mirror] Found ${chunkFiles.length} chunk files: ${chunkFiles.join(', ')}`)
+
+    let rowsWritten = 0
+    let headerWritten = false
+
+    // Delete temp file if it exists from previous failed attempt
+    try {
+      await fs.unlink(sessionCsvTmpPath)
+    } catch {
+      // Ignore if doesn't exist
+    }
+
+    try {
+      // Process each chunk file in order
+      for (const chunkFile of chunkFiles) {
+        const chunkPath = path.join(session.rootPath, chunkFile)
+        console.log(`[QSensor Mirror] Processing ${chunkFile}...`)
+
+        const content = await fs.readFile(chunkPath, 'utf-8')
+        const lines = content.split('\n')
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim()
+
+          if (line === '') {
+            continue // Skip empty lines
+          }
+
+          // First non-empty line of first chunk is the header
+          if (!headerWritten && i === 0) {
+            await fs.appendFile(sessionCsvTmpPath, line + '\n', 'utf-8')
+            headerWritten = true
+            console.log(`[QSensor Mirror] Wrote header: ${line.substring(0, 60)}...`)
+            continue
+          }
+
+          // Skip header line in subsequent chunks
+          if (i === 0) {
+            continue
+          }
+
+          // Write data row
+          await fs.appendFile(sessionCsvTmpPath, line + '\n', 'utf-8')
+          rowsWritten++
+        }
+
+        console.log(`[QSensor Mirror] Processed ${chunkFile}: added ${lines.length - 1} rows`)
+      }
+
+      // Atomic rename
+      await fs.rename(sessionCsvTmpPath, sessionCsvPath)
+
+      console.log(`[QSensor Mirror] ✓ Successfully created ${sessionCsvPath} with ${rowsWritten} data rows`)
+
+      return { success: true, rowsWritten }
+    } catch (error) {
+      // Clean up on error
+      try {
+        await fs.unlink(sessionCsvTmpPath)
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error
+    }
+  } catch (error: any) {
+    console.error(`[QSensor Mirror] Failed to combine chunks:`, error)
+    return { success: false, rowsWritten: 0, error: error.message }
+  }
+}
+
+/**
  * Stop mirroring session.
+ *
+ * IMPORTANT: This should be called AFTER /record/stop has been called on the backend
+ * to ensure the final chunk is finalized and available for mirroring.
  */
 export async function stopMirrorSession(
   sessionId: string
@@ -290,15 +492,63 @@ export async function stopMirrorSession(
   }
 
   try {
-    // Stop polling
+    // Stop polling timer
     session.running = false
     if (session.intervalId) {
       clearInterval(session.intervalId)
       session.intervalId = null
     }
+    console.log(`[QSensor Mirror] Polling stopped for session ${sessionId}`)
 
-    // Final poll to catch any remaining chunks
+    // CRITICAL: Wait a moment for backend's /record/stop to complete final chunk finalization
+    // The backend needs time to flush, compute SHA256, and write manifest.json
+    console.log(`[QSensor Mirror] Waiting 1s for backend to finalize last chunk...`)
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    // Final poll to catch the last finalized chunk
+    console.log(`[QSensor Mirror] Running final poll to catch last chunk...`)
     await pollAndMirror(session)
+
+    // Combine all chunks into single session.csv file
+    console.log(`[QSensor Mirror] Combining chunks into session.csv...`)
+    const combineResult = await combineChunksIntoSessionFile(session)
+
+    if (!combineResult.success) {
+      console.warn(`[QSensor Mirror] ⚠ Failed to create session.csv: ${combineResult.error}`)
+      console.warn(`[QSensor Mirror] ⚠ Keeping chunk files for manual recovery`)
+      // Write metadata and continue - chunks remain for manual recovery
+      await writeMirrorMetadata(session)
+      activeSessions.delete(sessionId)
+      return { success: true } // Don't fail stop operation
+    }
+
+    console.log(`[QSensor Mirror] ✓ Created session.csv with ${combineResult.rowsWritten} rows`)
+
+    // Verify session.csv integrity before cleanup
+    const sessionCsvPath = path.join(session.rootPath, 'session.csv')
+    console.log(`[QSensor Mirror] Verifying session.csv integrity...`)
+    const verifyResult = await verifySessionFile(sessionCsvPath, combineResult.rowsWritten)
+
+    if (!verifyResult.valid) {
+      console.error(`[QSensor Mirror] ✗ Session file verification FAILED: ${verifyResult.error}`)
+      console.error(`[QSensor Mirror] ✗ Keeping chunk files for recovery (DO NOT DELETE)`)
+      // Write metadata and continue - chunks remain for recovery
+      await writeMirrorMetadata(session)
+      activeSessions.delete(sessionId)
+      return { success: true } // Don't fail stop operation, but warn user
+    }
+
+    console.log(`[QSensor Mirror] ✓ Session.csv verified: ${verifyResult.actualRows} rows`)
+
+    // Clean up redundant chunk files after successful verification
+    console.log(`[QSensor Mirror] Cleaning up redundant chunk files...`)
+    const cleanupResult = await cleanupChunkFiles(session)
+    console.log(`[QSensor Mirror] Cleanup result: deleted ${cleanupResult.deleted} chunks, ${cleanupResult.errors} errors`)
+
+    if (cleanupResult.errors > 0) {
+      console.warn(`[QSensor Mirror] ⚠ Some chunk files could not be deleted (${cleanupResult.errors} errors)`)
+      // Non-fatal - session.csv is verified and available
+    }
 
     // Write final metadata
     await writeMirrorMetadata(session)

@@ -74,12 +74,28 @@ onMounted(() => {
   // In production, this would call the API health endpoint
   isConnected.value = true
 
-  // Refresh stats every 5 seconds while recording
-  statsInterval = setInterval(() => {
-    if (qsensorStore.isRecording) {
-      qsensorStore.refreshStatus()
+  // Function to update stats interval based on current cadence
+  const updateStatsInterval = () => {
+    const cadenceSec = qsensorStore.cadenceSec || 60
+    // Refresh at 80% of cadence (min 2s, max 30s)
+    const refreshMs = Math.min(30000, Math.max(2000, cadenceSec * 1000 * 0.8))
+
+    if (statsInterval) {
+      clearInterval(statsInterval)
     }
-  }, 5000)
+
+    statsInterval = setInterval(() => {
+      if (qsensorStore.isRecording) {
+        qsensorStore.refreshStatus()
+      }
+    }, refreshMs)
+  }
+
+  // Initialize interval
+  updateStatsInterval()
+
+  // Watch for cadence changes and update interval (for future recordings)
+  // Note: Cadence changes don't affect ongoing recordings, but will apply to next one
 })
 
 onUnmounted(() => {

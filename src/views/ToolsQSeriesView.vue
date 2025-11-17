@@ -136,6 +136,28 @@
                 </button>
               </div>
 
+              <!-- Mirroring Interval Selection -->
+              <div class="flex items-center gap-4">
+                <label class="text-sm font-medium min-w-[120px]">Mirror cadence:</label>
+                <input
+                  v-model.number="mirrorCadenceSec"
+                  type="range"
+                  min="1"
+                  max="60"
+                  step="1"
+                  class="flex-1"
+                  :disabled="qsensorStore.isRecording"
+                />
+                <span class="text-sm font-mono min-w-[60px]">{{ mirrorCadenceSec }}s</span>
+              </div>
+              <div class="text-xs text-gray-400 -mt-2">
+                <p>How often to poll and pull new data chunks from the ROV (1-60 seconds).</p>
+                <p class="mt-1">Lower values = more frequent updates, higher network usage.</p>
+                <p v-if="mirrorCadenceSec < 5" class="mt-1 text-yellow-400">
+                  ⚠️ Very low cadence (&lt;5s) may create many small files and increase I/O load.
+                </p>
+              </div>
+
               <div class="flex items-center gap-4">
                 <button
                   v-if="!qsensorStore.isRecording"
@@ -171,12 +193,12 @@
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                   <div>
-                    <span class="font-medium">Cadence:</span>
+                    <span class="font-medium">Mirror cadence:</span>
                     <span class="ml-2">{{ qsensorStore.cadenceSec }}s</span>
                   </div>
                   <div>
-                    <span class="font-medium">Bandwidth:</span>
-                    <span class="ml-2">{{ qsensorStore.fullBandwidth ? 'Full (2s)' : 'Normal' }}</span>
+                    <span class="font-medium">Mission:</span>
+                    <span class="ml-2">{{ qsensorStore.missionName }}</span>
                   </div>
                 </div>
                 <div v-if="qsensorStore.lastSync">
@@ -289,6 +311,9 @@ const isStopping = ref(false)
 // Storage path
 const storagePath = ref<string>('')
 
+// Mirroring cadence (1-60 seconds, default 60)
+const mirrorCadenceSec = ref(60)
+
 // Mirroring stats
 const mirrorStats = ref<any>(null)
 let statsInterval: NodeJS.Timeout | null = null
@@ -341,14 +366,21 @@ function formatTimestamp(iso: string): string {
 // Connection handlers
 
 async function handleConnect() {
+  const t0 = performance.now()
+  addLog('info', `[PERF] handleConnect() START at t=${t0.toFixed(1)}ms`)
+
   isConnecting.value = true
   connectionError.value = null
   healthData.value = null
 
   try {
     // Call /sensor/connect via IPC (bypasses CORS)
+    const t1 = performance.now()
+    addLog('info', `[PERF] Calling qsensorConnect IPC at t=${(t1-t0).toFixed(1)}ms`)
     addLog('info', 'Connecting to sensor...')
     const connectResult = await window.electronAPI.qsensorConnect(apiBaseUrl.value, serialPort.value, baudRate.value)
+    const t2 = performance.now()
+    addLog('info', `[PERF] qsensorConnect returned after ${(t2-t1).toFixed(1)}ms (total: ${(t2-t0).toFixed(1)}ms)`)
 
     if (!connectResult.success) {
       throw new Error(`Connect failed: ${connectResult.error || 'Unknown error'}`)
@@ -434,6 +466,9 @@ async function handleDisconnect() {
 async function handleStartRecording() {
   if (!isConnected.value) return
 
+  const t0 = performance.now()
+  addLog('info', `[PERF] handleStartRecording() START at t=${t0.toFixed(1)}ms`)
+
   isStarting.value = true
 
   try {
@@ -441,8 +476,12 @@ async function handleStartRecording() {
     const vehicleAddress = apiBaseUrl.value.replace('http://', '').replace(':9150', '')
 
     // STEP 1: Start acquisition on the sensor (freerun mode)
+    const t1 = performance.now()
+    addLog('info', `[PERF] STEP 1: Calling qsensorStartAcquisition at t=${(t1-t0).toFixed(1)}ms`)
     addLog('info', 'Starting sensor acquisition (freerun)...')
     const acqResult = await window.electronAPI.qsensorStartAcquisition(apiBaseUrl.value, undefined)
+    const t2 = performance.now()
+    addLog('info', `[PERF] qsensorStartAcquisition returned after ${(t2-t1).toFixed(1)}ms`)
 
     if (!acqResult.success) {
       throw new Error(`Failed to start acquisition: ${acqResult.error}`)
@@ -453,12 +492,14 @@ async function handleStartRecording() {
     await new Promise(resolve => setTimeout(resolve, 100))
 
     // STEP 2: Start recording session on API
-    addLog('info', 'Starting recording session...')
+    // Link roll_interval_s to mirror cadence (backend clamps to 1-300s)
+    const rollIntervalS = Math.max(1, Math.min(300, mirrorCadenceSec.value))
+    addLog('info', `Starting recording session (mirrorCadence=${mirrorCadenceSec.value}s, rollInterval=${rollIntervalS}s)...`)
     const recordResult = await window.electronAPI.qsensorStartRecording(apiBaseUrl.value, {
       rate_hz: 500,
       schema_version: 1,
       mission: missionName,
-      roll_interval_s: 60,
+      roll_interval_s: rollIntervalS,
     })
 
     if (!recordResult.success) {
@@ -470,8 +511,9 @@ async function handleStartRecording() {
     const sessionId = recordResult.data.session_id
     addLog('info', `Recording session created: ${sessionId}`)
 
-    // STEP 3: Arm the store with the API-provided session ID
+    // STEP 3: Arm the store with the API-provided session ID and update cadence
     qsensorStore.arm(sessionId, missionName, vehicleAddress)
+    qsensorStore.cadenceSec = mirrorCadenceSec.value  // Apply user-selected cadence
 
     // STEP 4: Start mirroring
     const mirrorResult = await qsensorStore.start()
@@ -479,9 +521,13 @@ async function handleStartRecording() {
     if (mirrorResult.success) {
       addLog('info', `Mirroring started for session ${sessionId}`)
 
-      // Start stats refresh
+      // Start stats refresh synced to mirroring cadence
       if (!statsInterval) {
-        statsInterval = setInterval(refreshStats, 5000)
+        // Refresh slightly more often than cadence (80% of interval)
+        // Min 2s to avoid IPC spam, max 30s to avoid appearing frozen
+        const refreshIntervalMs = Math.min(30000, Math.max(2000, qsensorStore.cadenceSec * 1000 * 0.8))
+        statsInterval = setInterval(refreshStats, refreshIntervalMs)
+        addLog('info', `Stats refresh: every ${(refreshIntervalMs/1000).toFixed(1)}s (cadence=${qsensorStore.cadenceSec}s)`)
       }
     } else {
       // Rollback: stop recording and acquisition
@@ -502,32 +548,40 @@ async function handleStopRecording() {
   try {
     const sessionId = qsensorStore.currentSessionId
 
-    // STEP 1: Stop mirroring
-    addLog('info', 'Stopping mirroring...')
-    const mirrorResult = await qsensorStore.stop()
-
-    if (!mirrorResult.success) {
-      addLog('warn', `Failed to stop mirroring: ${mirrorResult.error}`)
-    } else {
-      addLog('info', 'Mirroring stopped')
+    // STEP 1: Stop mirroring polling (but don't finalize yet)
+    // This stops the timer but keeps session alive for final poll
+    addLog('info', 'Pausing mirroring polling...')
+    if (qsensorStore.isRecording) {
+      // Just mark as not recording to pause mirroring, but don't call stop() yet
+      qsensorStore.isRecording = false
     }
 
-    // STEP 2: Stop recording session on API
+    // STEP 2: Stop recording session on API (finalizes last chunk)
     if (sessionId) {
-      addLog('info', 'Stopping recording session...')
+      addLog('info', 'Stopping recording session and finalizing last chunk...')
       const recordResult = await window.electronAPI.qsensorStopRecording(apiBaseUrl.value, sessionId)
 
       if (recordResult.success) {
         addLog(
           'info',
-          `Recording stopped: ${recordResult.data.chunks} chunks, ${recordResult.data.rows} rows`
+          `Recording session stopped: ${recordResult.data.chunks} chunks, ${recordResult.data.rows} rows`
         )
       } else {
         addLog('warn', `Failed to stop recording session: ${recordResult.error}`)
       }
     }
 
-    // STEP 3: Stop acquisition on the sensor
+    // STEP 3: Now stop mirroring (does final poll + combines chunks)
+    addLog('info', 'Finalizing mirroring and combining chunks...')
+    const mirrorResult = await qsensorStore.stop()
+
+    if (!mirrorResult.success) {
+      addLog('warn', `Failed to finalize mirroring: ${mirrorResult.error}`)
+    } else {
+      addLog('info', 'Mirroring finalized, session.csv created')
+    }
+
+    // STEP 4: Stop acquisition on the sensor
     addLog('info', 'Stopping sensor acquisition...')
     const acqResult = await window.electronAPI.qsensorStopAcquisition(apiBaseUrl.value)
 

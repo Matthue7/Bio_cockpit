@@ -17,7 +17,7 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
 
   try {
     // Log request details
-    console.log(`${prefix}[DEBUG] ${method} ${url}`)
+    console.log(`${prefix}[PERF] ${method} ${url} - START at t=${startTime}ms`)
     if (options.body) {
       const bodyPreview = typeof options.body === 'string' ? options.body.substring(0, 500) : '[Binary]'
       console.log(`${prefix}[DEBUG]   Body: ${bodyPreview}`)
@@ -26,8 +26,11 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
       console.log(`${prefix}[DEBUG]   Timeout: ${(options.signal as any).timeout || 'default'}ms`)
     }
 
+    const fetchStart = Date.now()
     const response = await fetch(url, options)
-    const elapsed = Date.now() - startTime
+    const fetchEnd = Date.now()
+    const elapsed = fetchEnd - startTime
+    console.log(`${prefix}[PERF]   fetch() took ${fetchEnd - fetchStart}ms`)
 
     // Log response details
     console.log(`${prefix}[HTTP] ${method} ${url} → ${response.status} ${response.statusText} (${elapsed}ms)`)
@@ -58,10 +61,16 @@ async function connect(
   port: string,
   baud: number
 ): Promise<{ success: boolean; data?: any; error?: string }> {
+  const fnStart = Date.now()
+  console.log(`[QSensor Control][PERF] connect() START at t=${fnStart}ms`)
+
   try {
     const url = new URL('/sensor/connect', baseUrl)
     url.searchParams.set('port', port)
     url.searchParams.set('baud', String(baud))
+
+    const beforeFetch = Date.now()
+    console.log(`[QSensor Control][PERF]   URL construction took ${beforeFetch - fnStart}ms`)
 
     // 30 second timeout - connection can take time to enter config menu
     const data = await fetchFromMain(url.toString(), {
@@ -69,9 +78,13 @@ async function connect(
       signal: AbortSignal.timeout(30000),
     })
 
+    const afterFetch = Date.now()
+    console.log(`[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${afterFetch - fnStart}ms)`)
     console.log('[QSensor Control] Connected:', data)
     return { success: true, data }
   } catch (error: any) {
+    const fnEnd = Date.now()
+    console.error(`[QSensor Control][PERF] connect() FAILED after ${fnEnd - fnStart}ms: ${error.message}`)
     console.error('[QSensor Control] Connect failed:', error.message)
     return { success: false, error: error.message }
   }
@@ -126,6 +139,9 @@ async function startAcquisition(
   baseUrl: string,
   pollHz?: number
 ): Promise<{ success: boolean; data?: any; error?: string }> {
+  const fnStart = Date.now()
+  console.log(`[QSensor Control][PERF] startAcquisition() START at t=${fnStart}ms`)
+
   try {
     const url = new URL('/sensor/start', baseUrl)
     if (pollHz !== undefined) {
@@ -134,15 +150,22 @@ async function startAcquisition(
     // CRITICAL: Disable auto_record so /record/start can manage the chunked recorder
     url.searchParams.set('auto_record', 'false')
 
+    const beforeFetch = Date.now()
+    console.log(`[QSensor Control][PERF]   URL construction took ${beforeFetch - fnStart}ms`)
+
     // Increased to 15s - acquisition start can be slow (serial config, auto-record setup)
     const data = await fetchFromMain(url.toString(), {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
     })
 
+    const afterFetch = Date.now()
+    console.log(`[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${afterFetch - fnStart}ms)`)
     console.log('[QSensor Control] Acquisition started:', data)
     return { success: true, data }
   } catch (error: any) {
+    const fnEnd = Date.now()
+    console.error(`[QSensor Control][PERF] startAcquisition() FAILED after ${fnEnd - fnStart}ms: ${error.message}`)
     console.error('[QSensor Control] Start acquisition failed:', error.message)
     return { success: false, error: error.message }
   }
@@ -185,15 +208,19 @@ async function startRecording(
     // Robust URL construction - handles trailing slashes correctly
     const url = new URL('/record/start', baseUrl)
 
+    const payload = {
+      rate_hz: options.rate_hz ?? 500,
+      schema_version: options.schema_version ?? 1,
+      mission: options.mission ?? 'Cockpit',
+      roll_interval_s: options.roll_interval_s ?? 60,
+    }
+
+    console.log(`[QSensor Control] Starting recording: mission="${payload.mission}", rate=${payload.rate_hz}Hz, roll_interval=${payload.roll_interval_s}s`)
+
     const data = await fetchFromMain(url.toString(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        rate_hz: options.rate_hz ?? 500,
-        schema_version: options.schema_version ?? 1,
-        mission: options.mission ?? 'Cockpit',
-        roll_interval_s: options.roll_interval_s ?? 60,
-      }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000),
     })
 
