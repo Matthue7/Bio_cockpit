@@ -1,64 +1,126 @@
 <template>
   <div class="mini-qsensor-recorder">
     <div class="header">
-      <span class="title">Q-Sensor</span>
-      <span :class="['status-indicator', isConnected ? 'connected' : 'disconnected']">
-        {{ isConnected ? '●' : '○' }}
+      <span class="title">Q-Sensors</span>
+      <span :class="['status-indicator', overallStatusClass]">
+        {{ overallStatusIcon }}
       </span>
     </div>
 
-    <div class="info">
+    <!-- In-Water Sensor Summary -->
+    <div class="sensor-row">
+      <span class="sensor-label">In-Water:</span>
+      <span :class="['sensor-status', inWaterStatusClass]">{{ inWaterStatus }}</span>
+    </div>
+
+    <!-- Surface Sensor Summary -->
+    <div class="sensor-row">
+      <span class="sensor-label">Surface:</span>
+      <span :class="['sensor-status', surfaceStatusClass]">{{ surfaceStatus }}</span>
+    </div>
+
+    <!-- Combined Stats (when recording) -->
+    <div v-if="qsensorStore.isAnyRecording" class="info">
       <div class="info-row">
-        <span class="label">State:</span>
-        <span class="value">{{ recordingState }}</span>
+        <span class="label">Total:</span>
+        <span class="value">{{ formattedTotalBytes }}</span>
       </div>
 
-      <div v-if="qsensorStore.isRecording" class="info-row">
-        <span class="label">Mirrored:</span>
-        <span class="value">{{ formattedBytes }}</span>
-      </div>
-
-      <div v-if="qsensorStore.lastSync" class="info-row">
+      <div v-if="latestSync" class="info-row">
         <span class="label">Last Sync:</span>
         <span class="value">{{ timeSinceSync }}</span>
       </div>
+    </div>
 
-      <div v-if="qsensorStore.lastError" class="info-row error">
-        <span class="label">Error:</span>
-        <span class="value">{{ qsensorStore.lastError }}</span>
-      </div>
+    <!-- Errors -->
+    <div v-if="qsensorStore.combinedErrors.length > 0" class="info-row error">
+      <span class="label">Error:</span>
+      <span class="value">{{ qsensorStore.combinedErrors.length }} issues</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
+
 import { useQSensorStore } from '@/stores/qsensor'
+import { isSensorRecording } from '@/stores/qsensor-common'
 
 const qsensorStore = useQSensorStore()
 
-const isConnected = ref(false)
 let statsInterval: NodeJS.Timeout | null = null
 
-// Computed
-
-const recordingState = computed(() => {
-  if (qsensorStore.isRecording) return 'Recording'
-  if (qsensorStore.isArmed) return 'Armed'
-  return 'Idle'
+// In-Water sensor status
+const inWaterStatusClass = computed(() => {
+  const sensor = qsensorStore.inWaterSensor
+  if (isSensorRecording(sensor)) return 'recording'
+  if (sensor.isConnected) return 'connected'
+  return 'disconnected'
 })
 
-const formattedBytes = computed(() => {
-  const bytes = qsensorStore.bytesMirrored
+const inWaterStatus = computed(() => {
+  const sensor = qsensorStore.inWaterSensor
+  if (isSensorRecording(sensor)) return 'REC'
+  if (sensor.isConnected) return 'OK'
+  return 'OFF'
+})
+
+// Surface sensor status
+const surfaceStatusClass = computed(() => {
+  const sensor = qsensorStore.surfaceSensor
+  if (isSensorRecording(sensor)) return 'recording'
+  if (sensor.isConnected) return 'connected'
+  return 'disconnected'
+})
+
+const surfaceStatus = computed(() => {
+  const sensor = qsensorStore.surfaceSensor
+  if (isSensorRecording(sensor)) return 'REC'
+  if (sensor.isConnected) return 'OK'
+  return 'OFF'
+})
+
+// Overall status indicator
+const overallStatusClass = computed(() => {
+  if (qsensorStore.areBothRecording) return 'recording'
+  if (qsensorStore.isAnyRecording) return 'partial-recording'
+  if (qsensorStore.areBothConnected) return 'connected'
+  if (qsensorStore.inWaterSensor.isConnected || qsensorStore.surfaceSensor.isConnected) return 'partial'
+  return 'disconnected'
+})
+
+const overallStatusIcon = computed(() => {
+  if (qsensorStore.areBothRecording) return '●'
+  if (qsensorStore.isAnyRecording) return '◐'
+  if (qsensorStore.areBothConnected) return '●'
+  if (qsensorStore.inWaterSensor.isConnected || qsensorStore.surfaceSensor.isConnected) return '◐'
+  return '○'
+})
+
+// Combined stats
+const formattedTotalBytes = computed(() => {
+  const bytes = qsensorStore.totalBytesMirrored
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 })
 
-const timeSinceSync = computed(() => {
-  if (!qsensorStore.lastSync) return 'Never'
+const latestSync = computed(() => {
+  const inWaterSync = qsensorStore.inWaterSensor.lastSync
+  const surfaceSync = qsensorStore.surfaceSensor.lastSync
 
-  const syncTime = new Date(qsensorStore.lastSync)
+  if (!inWaterSync && !surfaceSync) return null
+  if (!inWaterSync) return surfaceSync
+  if (!surfaceSync) return inWaterSync
+
+  // Return the most recent sync
+  return new Date(inWaterSync) > new Date(surfaceSync) ? inWaterSync : surfaceSync
+})
+
+const timeSinceSync = computed(() => {
+  if (!latestSync.value) return 'Never'
+
+  const syncTime = new Date(latestSync.value)
   const now = new Date()
   const diffSec = Math.floor((now.getTime() - syncTime.getTime()) / 1000)
 
@@ -70,11 +132,7 @@ const timeSinceSync = computed(() => {
 // Lifecycle
 
 onMounted(() => {
-  // Check connection (basic health check placeholder)
-  // In production, this would call the API health endpoint
-  isConnected.value = true
-
-  // Function to update stats interval based on current cadence
+  // Update stats interval based on current cadence
   const updateStatsInterval = () => {
     const cadenceSec = qsensorStore.cadenceSec || 60
     // Refresh at 80% of cadence (min 2s, max 30s)
@@ -84,18 +142,19 @@ onMounted(() => {
       clearInterval(statsInterval)
     }
 
-    statsInterval = setInterval(() => {
-      if (qsensorStore.isRecording) {
-        qsensorStore.refreshStatus()
+    statsInterval = setInterval(async () => {
+      // Refresh both sensors if they're recording
+      if (isSensorRecording(qsensorStore.inWaterSensor)) {
+        await qsensorStore.refreshSensorStatus('inWater')
+      }
+      if (isSensorRecording(qsensorStore.surfaceSensor)) {
+        await qsensorStore.refreshSensorStatus('surface')
       }
     }, refreshMs)
   }
 
   // Initialize interval
   updateStatsInterval()
-
-  // Watch for cadence changes and update interval (for future recordings)
-  // Note: Cadence changes don't affect ongoing recordings, but will apply to next one
 })
 
 onUnmounted(() => {
@@ -137,14 +196,61 @@ onUnmounted(() => {
   color: #4caf50;
 }
 
-.status-indicator.disconnected {
+.status-indicator.recording {
   color: #f44336;
+  animation: pulse 1s infinite;
+}
+
+.status-indicator.partial-recording {
+  color: #ff9800;
+  animation: pulse 1s infinite;
+}
+
+.status-indicator.partial {
+  color: #ff9800;
+}
+
+.status-indicator.disconnected {
+  color: #9e9e9e;
+}
+
+.sensor-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sensor-label {
+  font-size: 11px;
+}
+
+.sensor-status {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.sensor-status.connected {
+  color: #4caf50;
+}
+
+.sensor-status.recording {
+  color: #f44336;
+}
+
+.sensor-status.disconnected {
+  color: #9e9e9e;
 }
 
 .info {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .info-row {
@@ -163,5 +269,15 @@ onUnmounted(() => {
 
 .value {
   font-family: monospace;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 </style>

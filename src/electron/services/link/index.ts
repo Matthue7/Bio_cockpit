@@ -11,12 +11,28 @@ import { UdpLink } from './udp'
 class LinkService {
   private links: Map<string, Link> = new Map()
   private mainWindow: BrowserWindow | null = null
+  private initialized: boolean = false
 
   /**
    * Serial Service Constructor
+   * Note: IPC handlers are NOT set up in constructor to avoid issues with
+   * electron module not being fully initialized at module load time.
+   * Call initialize() after electron app is ready.
    */
   constructor() {
+    // Don't call setupIpcHandlers here - electron may not be ready yet
+  }
+
+  /**
+   * Initialize the link service by setting up IPC handlers.
+   * Must be called after electron app is ready.
+   */
+  initialize(): void {
+    if (this.initialized) {
+      return
+    }
     this.setupIpcHandlers()
+    this.initialized = true
   }
 
   /**

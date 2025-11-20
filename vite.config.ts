@@ -22,6 +22,14 @@ const baseConfig = {
           vite: {
             build: {
               outDir: 'dist/electron',
+              rollupOptions: {
+                external: [
+                  'serialport',
+                  '@serialport/bindings-cpp',
+                  '@serialport/parser-readline',
+                  '@serialport/parser-delimiter',
+                ],
+              },
             },
           },
           onstart: () => {

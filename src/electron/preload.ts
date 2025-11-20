@@ -91,14 +91,71 @@ contextBridge.exposeInMainWorld('electronAPI', {
   qsensorStopRecording: (baseUrl: string, sessionId: string) =>
     ipcRenderer.invoke('qsensor:stop-recording', baseUrl, sessionId),
   // Q-Sensor mirroring
-  startQSensorMirror: (sessionId: string, vehicleAddress: string, missionName: string, cadenceSec: number, fullBandwidth: boolean) =>
-    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth),
+  startQSensorMirror: (sessionId: string, vehicleAddress: string, missionName: string, cadenceSec: number, fullBandwidth: boolean, unifiedSessionTimestamp?: string) =>
+    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
   // Q-Sensor storage path
   selectQSensorStorageDirectory: () => ipcRenderer.invoke('select-qsensor-storage-directory'),
   getQSensorStoragePath: () => ipcRenderer.invoke('get-qsensor-storage-path'),
   setQSensorStoragePath: (storagePath: string) => ipcRenderer.invoke('set-qsensor-storage-path', storagePath),
+  // Q-Sensor serial recording (topside/surface sensor)
+  qsensorSerialConnect: (port: string, baudRate: number) => {
+    console.log(`[Preload] qsensorSerialConnect called - port: ${port}, baudRate: ${baudRate}`)
+    return ipcRenderer.invoke('qsensor-serial:connect', port, baudRate)
+      .then((result: any) => {
+        console.log('[Preload] qsensorSerialConnect result:', JSON.stringify(result))
+        return result
+      })
+      .catch((error: any) => {
+        console.error('[Preload] qsensorSerialConnect error:', error)
+        console.error('[Preload] Error message:', error?.message)
+        console.error('[Preload] Error stack:', error?.stack)
+        throw error
+      })
+  },
+  qsensorSerialDisconnect: () => {
+    console.log('[Preload] qsensorSerialDisconnect called')
+    return ipcRenderer.invoke('qsensor-serial:disconnect')
+  },
+  qsensorSerialGetHealth: () => {
+    console.log('[Preload] qsensorSerialGetHealth called')
+    return ipcRenderer.invoke('qsensor-serial:get-health')
+  },
+  qsensorSerialStartAcquisition: (pollHz: number) => {
+    console.log(`[Preload] qsensorSerialStartAcquisition called - pollHz: ${pollHz}`)
+    return ipcRenderer.invoke('qsensor-serial:start-acquisition', pollHz)
+  },
+  qsensorSerialStopAcquisition: () => {
+    console.log('[Preload] qsensorSerialStopAcquisition called')
+    return ipcRenderer.invoke('qsensor-serial:stop-acquisition')
+  },
+  qsensorSerialStartRecording: (params: {
+    mission: string
+    rollIntervalS?: number
+    rateHz?: number
+    storagePath?: string
+    unifiedSessionTimestamp?: string
+  }) => ipcRenderer.invoke('qsensor-serial:start-recording', params),
+  qsensorSerialStopRecording: () => ipcRenderer.invoke('qsensor-serial:stop-recording'),
+  qsensorSerialGetStats: () => ipcRenderer.invoke('qsensor-serial:get-stats'),
+  qsensorSerialListPorts: () => {
+    console.log('[Preload] qsensorSerialListPorts called')
+    return ipcRenderer.invoke('qsensor-serial:list-ports')
+  },
+  // Q-Sensor time sync
+  measureClockOffset: (baseUrl: string) =>
+    ipcRenderer.invoke('qsensor:measure-clock-offset', baseUrl),
+  updateSyncMetadata: (
+    sessionRoot: string,
+    timeSync: {
+      method: string
+      offsetMs: number | null
+      uncertaintyMs: number | null
+      measuredAt: string | null
+      error?: string | null
+    }
+  ) => ipcRenderer.invoke('qsensor:update-sync-metadata', sessionRoot, timeSync),
   getElectronLogContent: (logName: string) => ipcRenderer.invoke('get-electron-log-content', logName),
   deleteElectronLog: (logName: string) => ipcRenderer.invoke('delete-electron-log', logName),
   deleteOldElectronLogs: () => ipcRenderer.invoke('delete-old-electron-logs'),

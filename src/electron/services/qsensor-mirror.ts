@@ -10,6 +10,13 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
 import store from './config-store'
+import {
+  buildSensorDirectoryName,
+  buildUnifiedSessionRoot,
+  ensureSyncMetadata,
+  getSyncMetadataPath,
+  updateSensorMetadata,
+} from './qsensor-session-utils'
 
 interface MirrorSession {
   sessionId: string
@@ -18,6 +25,7 @@ interface MirrorSession {
   cadenceSec: number
   fullBandwidth: boolean
   rootPath: string
+  sessionRoot?: string
   lastChunkIndex: number
   bytesMirrored: number
   lastSync: string | null
@@ -201,16 +209,24 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 
 /**
  * Start mirroring session.
+ *
+ * @param sessionId - Session ID from the Pi recording
+ * @param vehicleAddress - Vehicle hostname or IP
+ * @param missionName - Mission name for directory organization
+ * @param cadenceSec - Polling cadence in seconds
+ * @param fullBandwidth - Enable fast polling mode
+ * @param unifiedSessionTimestamp - Optional timestamp for unified session directory (Phase 4)
  */
 export async function startMirrorSession(
   sessionId: string,
   vehicleAddress: string,
   missionName: string,
   cadenceSec: number,
-  fullBandwidth: boolean
+  fullBandwidth: boolean,
+  unifiedSessionTimestamp?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, vehicle=${vehicleAddress}, mission=${missionName}`)
+    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, vehicle=${vehicleAddress}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`)
 
     // Check if already running
     if (activeSessions.has(sessionId)) {
@@ -221,12 +237,34 @@ export async function startMirrorSession(
     // Resolve storage path from config or use default
     const customStoragePath = store.get('qsensorStoragePath')
     const basePath = customStoragePath || path.join(app.getPath('userData'), 'qsensor')
-    const rootPath = path.join(basePath, missionName, sessionId)
+
+    // Use unified session layout if timestamp provided (Phase 4+)
+    // Structure: {storage}/{mission}/session_{timestamp}/in-water_{sessionId}/
+    // Otherwise fall back to legacy: {storage}/{mission}/{sessionId}/
+    let rootPath: string
+    let unifiedRoot: string | null = null
+    if (unifiedSessionTimestamp) {
+      unifiedRoot = buildUnifiedSessionRoot(basePath, missionName, unifiedSessionTimestamp)
+      rootPath = path.join(unifiedRoot, buildSensorDirectoryName('inWater', sessionId))
+    } else {
+      rootPath = path.join(basePath, missionName, sessionId)
+    }
 
     console.log(`[QSensor Mirror] Storage path resolved: customPath=${customStoragePath || 'none'}, basePath=${basePath}, rootPath=${rootPath}`)
 
     // Create directory
     await fs.mkdir(rootPath, { recursive: true })
+
+    // Create sync_metadata.json placeholder in unified session root (Phase 4+)
+    if (unifiedRoot && unifiedSessionTimestamp) {
+      await ensureSyncMetadata(unifiedRoot, missionName, unifiedSessionTimestamp)
+      await updateSensorMetadata(unifiedRoot, 'inWater', {
+        sessionId,
+        directory: buildSensorDirectoryName('inWater', sessionId),
+        startedAt: new Date().toISOString(),
+      })
+      console.log(`[QSensor Mirror] sync_metadata.json available at ${getSyncMetadataPath(unifiedRoot)}`)
+    }
     console.log(`[QSensor Mirror] Created directory: ${rootPath}`)
 
     // Load existing metadata if resuming
@@ -240,6 +278,7 @@ export async function startMirrorSession(
       cadenceSec: fullBandwidth ? 2 : cadenceSec, // Fast polling in full-bandwidth mode
       fullBandwidth,
       rootPath,
+      sessionRoot: unifiedRoot ?? undefined,
       lastChunkIndex: existing?.lastChunkIndex ?? -1,
       bytesMirrored: existing?.bytesMirrored ?? 0,
       lastSync: null,
@@ -270,7 +309,12 @@ export async function startMirrorSession(
       `[QSensor Mirror] Started session ${sessionId}: cadence=${session.cadenceSec}s, path=${rootPath}`
     )
 
-    return { success: true }
+    return {
+      success: true,
+      data: {
+        sessionRoot: unifiedRoot ?? path.join(basePath, missionName, sessionId),
+      },
+    }
   } catch (error: any) {
     console.error(`[QSensor Mirror] Start failed:`, error)
     return { success: false, error: error.message }
@@ -553,6 +597,16 @@ export async function stopMirrorSession(
     // Write final metadata
     await writeMirrorMetadata(session)
 
+    if (session.sessionRoot) {
+      const sessionCsvPath = path.join(session.rootPath, 'session.csv')
+      const relativeCsv = path.relative(session.sessionRoot, sessionCsvPath)
+      await updateSensorMetadata(session.sessionRoot, 'inWater', {
+        stoppedAt: new Date().toISOString(),
+        sessionCsv: relativeCsv,
+        bytesMirrored: session.bytesMirrored,
+      })
+    }
+
     activeSessions.delete(sessionId)
 
     console.log(`[QSensor Mirror] Stopped session ${sessionId}`)
@@ -595,13 +649,13 @@ export function getSessionStats(
 export function setupQSensorMirrorService(): void {
   ipcMain.handle(
     'qsensor:start-mirror',
-    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth) => {
+    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?) => {
       console.log(
         `[QSensor Mirror] IPC start request: session=${sessionId}, vehicle=${vehicleAddress}, cadence=${
           fullBandwidth ? 2 : cadenceSec
-        }s, fullBandwidth=${fullBandwidth}`
+        }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}`
       )
-      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth)
+      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp)
     }
   )
 

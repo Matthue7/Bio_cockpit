@@ -21,7 +21,6 @@ import {
 } from '@/libs/live-video-processor'
 import { datalogger } from '@/libs/sensors-logging'
 import { isEqual, sleep } from '@/libs/utils'
-import { QSensorClient } from '@/libs/qsensor-client'
 import { tempVideoStorage, videoStorage } from '@/libs/videoStorage'
 import type { Stream } from '@/libs/webrtc/signalling_protocol'
 import { useMainVehicleStore } from '@/stores/mainVehicle'
@@ -293,7 +292,7 @@ export const useVideoStore = defineStore('video', () => {
    * Stop recording the stream
    * @param {string} streamName - Name of the stream
    */
-  const stopRecording = (streamName: string): void => {
+  const stopRecording = async (streamName: string): Promise<void> => {
     // Stop the recording monitor so there's no risk of receiving alerts after the recording is stopped.
     console.info(`Stopping recording monitor for stream '${streamName}'.`)
     clearInterval(recordingMonitors[streamName])
@@ -307,36 +306,40 @@ export const useVideoStore = defineStore('video', () => {
 
     activeStreams.value[streamName]!.timeRecordingStart = undefined
 
-    // [NEW] Stop Q-Sensor recording and mirroring
+    // [DUAL-SENSOR] Stop Q-Sensor recording for both in-water and surface sensors
+    let qsensorStopPromise: Promise<void> | undefined
     if (window.electronAPI?.stopQSensorMirror) {
       const qsensorStore = useQSensorStore()
 
-      if (qsensorStore.currentSessionId) {
-        // Stop mirroring (fire-and-forget)
-        void qsensorStore.stop().catch((error) => {
-          console.warn('[Q-Sensor] Error stopping mirroring:', error)
-        })
-
-        // Stop recording on ROV (best-effort, fire-and-forget)
-        const mainVehicleStore = useMainVehicleStore()
-        const vehicleAddress = mainVehicleStore.mainVehicle?.hostname || 'blueos.local'
-        const client = new QSensorClient(`http://${vehicleAddress}:9150`)
-        void client.stopRecord(qsensorStore.currentSessionId)
-          .then(() => {
-            console.log(`[Q-Sensor] Recording stopped: ${qsensorStore.currentSessionId}`)
+      // Check if any sensor is recording (unified session or single sensor)
+      if (qsensorStore.isAnyRecording || qsensorStore.currentSessionId) {
+        // Stop both sensors (handles in-water mirroring, Pi recording, and surface serial)
+        qsensorStopPromise = qsensorStore
+          .stopBoth()
+          .then((result) => {
+            if (result.success) {
+              console.log('[Q-Sensor] Both sensors stopped successfully')
+            } else {
+              console.warn('[Q-Sensor] Error stopping sensors:', result.errors)
+            }
           })
           .catch((error) => {
-            console.warn('[Q-Sensor] Failed to stop recording on ROV:', error)
+            console.warn('[Q-Sensor] Error stopping sensors:', error)
           })
-
-        // Reset store
-        qsensorStore.reset()
+          .finally(() => {
+            // Reset store after stop attempt
+            qsensorStore.reset()
+          })
       }
     }
 
     activeStreams.value[streamName]!.mediaRecorder!.stop()
 
     alertStore.pushAlert(new Alert(AlertLevel.Success, `Stopped recording stream ${streamName}.`))
+
+    if (qsensorStopPromise) {
+      await qsensorStopPromise
+    }
   }
 
   const getVideoThumbnail = async (videoFileNameOrHash: string, isProcessed: boolean): Promise<Blob | null> => {
@@ -444,7 +447,7 @@ export const useVideoStore = defineStore('video', () => {
 
     activeStreams.value[streamName]!.mediaRecorder!.start(1000)
 
-    // [NEW] Start Q-Sensor recording and mirroring
+    // [DUAL-SENSOR] Start Q-Sensor recording for both in-water and surface sensors
     if (window.electronAPI?.startQSensorMirror) {
       try {
         const qsensorStore = useQSensorStore()
@@ -455,21 +458,25 @@ export const useVideoStore = defineStore('video', () => {
         const vehicleAddress = mainVehicleStore.mainVehicle?.hostname || 'blueos.local'
         const missionName = missionStore.missionName || 'Cockpit'
 
-        // Start recording on ROV
-        const client = new QSensorClient(`http://${vehicleAddress}:9150`)
-        const recordResponse = await client.startRecord({
-          rate_hz: 500,
+        // Update store with vehicle address
+        qsensorStore.apiBaseUrl = `http://${vehicleAddress}:9150`
+        qsensorStore.globalMissionName = missionName
+
+        // Start both sensors (in-water via Pi HTTP + surface via serial)
+        // This handles acquisition, recording, and mirroring for in-water,
+        // and serial acquisition + local recording for surface
+        const result = await qsensorStore.startBoth({
           mission: missionName,
-          roll_interval_s: 60,
+          rateHz: 500,
+          rollIntervalS: 60,
         })
 
-        console.log(`[Q-Sensor] Recording started: session_id=${recordResponse.session_id}`)
-
-        // Arm store and start mirroring
-        qsensorStore.arm(recordResponse.session_id, missionName, vehicleAddress)
-        await qsensorStore.start()
-
-        console.log(`[Q-Sensor] Mirroring started for session ${recordResponse.session_id}`)
+        if (result.success) {
+          console.log(`[Q-Sensor] Both sensors started for mission: ${missionName}`)
+        } else {
+          console.warn('[Q-Sensor] Failed to start sensors:', result.errors)
+          // Continue with video - sensor failure shouldn't block video recording
+        }
       } catch (error) {
         // Q-Sensor unavailable - log and continue with video only
         console.warn('[Q-Sensor] Failed to start recording (sensor may be offline):', error)

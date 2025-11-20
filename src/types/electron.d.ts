@@ -53,8 +53,9 @@ declare global {
         vehicleAddress: string,
         missionName: string,
         cadenceSec: number,
-        fullBandwidth: boolean
-      ) => Promise<{ success: boolean; error?: string }>
+        fullBandwidth: boolean,
+        unifiedSessionTimestamp?: string
+      ) => Promise<{ success: boolean; data?: { sessionRoot?: string }; error?: string }>
 
       stopQSensorMirror: (
         sessionId: string
@@ -70,6 +71,34 @@ declare global {
       getQSensorStoragePath: () => Promise<string>
 
       setQSensorStoragePath: (storagePath: string) => Promise<void>
+
+      // Q-Sensor serial recording APIs (topside/surface sensor)
+      qsensorSerialConnect: (
+        port: string,
+        baudRate: number
+      ) => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialDisconnect: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialGetHealth: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialStartAcquisition: (
+        pollHz: number
+      ) => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialStopAcquisition: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialStartRecording: (params: {
+        mission: string
+        rollIntervalS?: number
+        rateHz?: number
+        storagePath?: string
+        unifiedSessionTimestamp?: string
+      }) => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialStopRecording: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialGetStats: () => Promise<{ success: boolean; data?: any; error?: string }>
     }
   }
 }

@@ -9,6 +9,7 @@
         'opacity-30 bg-red-400': isOutside && !isRecording,
       }"
       class="w-6 transition-all duration-500 rounded-full aspect-square bg-red-lighten-1 hover:cursor-pointer opacity-70 hover:opacity-90"
+      data-test="record-toggle"
       @click="toggleRecording()"
     />
     <template v-if="!isRecording">
