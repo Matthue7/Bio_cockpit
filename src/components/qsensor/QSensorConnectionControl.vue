@@ -96,13 +96,9 @@ import type { SerialPortInfo } from '@/stores/qsensor'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
-  /**
-   *
-   */
+  // * Sensor identifier this control manages
   sensorId: QSensorId
-  /**
-   *
-   */
+  // * Sensor state backing the control
   sensor: QSensorState
 }>()
 
@@ -114,12 +110,12 @@ const emit = defineEmits<{
 
 const store = useQSensorStore()
 
-// Local state for form fields
+// * Local state for form fields
 const localApiBaseUrl = ref(props.sensor.apiBaseUrl || 'http://blueos.local:9150')
 const localBaudRate = ref(props.sensor.baudRate || 9600)
 const isRefreshingPorts = ref(false)
 
-// Connection state
+// * Connection state flags
 const isConnecting = ref(false)
 const isDisconnecting = ref(false)
 
@@ -129,17 +125,13 @@ const selectedSurfacePort = computed<string | null>({
   set: (value) => store.selectSurfaceSerialPort(value || null),
 })
 
-/**
- * Format dropdown label for a port
- */
+// * Format dropdown label for a port
 function formatPortLabel(port: SerialPortInfo): string {
   const details = [port.manufacturer, port.serialNumber].filter(Boolean).join(' • ')
   return details ? `${port.path} (${details})` : port.path
 }
 
-/**
- * Refresh available serial ports for surface sensor
- */
+// * Refresh available serial ports for surface sensor
 async function handleRefreshPorts(): Promise<void> {
   if (props.sensor.backendType !== 'serial') return
   isRefreshingPorts.value = true
@@ -165,7 +157,7 @@ watch(
   }
 )
 
-// Sync local state with sensor state changes
+// NOTE: Sync local state with sensor state changes
 watch(
   () => props.sensor.apiBaseUrl,
   (newVal) => {
@@ -180,14 +172,12 @@ watch(
   }
 )
 
-/**
- * Handle connect button click.
- */
+// * Handle connect button click.
 async function handleConnect(): Promise<void> {
   isConnecting.value = true
 
   try {
-    // Update sensor configuration in store before connecting
+    // * Update sensor configuration in store before connecting
     const sensorState = store.getSensor(props.sensorId)
     if (sensorState) {
       if (props.sensor.backendType === 'http') {
@@ -213,9 +203,7 @@ async function handleConnect(): Promise<void> {
   }
 }
 
-/**
- * Handle disconnect button click.
- */
+// * Handle disconnect button click.
 async function handleDisconnect(): Promise<void> {
   isDisconnecting.value = true
 

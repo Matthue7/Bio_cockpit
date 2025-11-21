@@ -98,6 +98,65 @@
       </div>
     </div>
 
+    <!-- Fusion Status (shown after recording stops) -->
+    <div
+      v-if="store.fusionStatus && store.fusionStatus.status"
+      class="p-3 bg-slate-800 rounded text-sm"
+      data-test="fusion-status"
+    >
+      <div class="font-medium text-gray-400 text-xs">Fusion Status</div>
+      <div class="flex items-center gap-2 mt-1">
+        <span
+          class="w-2 h-2 rounded-full"
+          :class="{
+            'bg-green-500': store.fusionStatus.status === 'complete',
+            'bg-yellow-500': store.fusionStatus.status === 'pending',
+            'bg-gray-500': store.fusionStatus.status === 'skipped',
+            'bg-red-500': store.fusionStatus.status === 'failed',
+          }"
+        ></span>
+        <span
+          class="text-sm"
+          :class="{
+            'text-green-400': store.fusionStatus.status === 'complete',
+            'text-yellow-400': store.fusionStatus.status === 'pending',
+            'text-gray-400': store.fusionStatus.status === 'skipped',
+            'text-red-400': store.fusionStatus.status === 'failed',
+          }"
+        >
+          {{ store.fusionStatus.status === 'complete' ? 'Complete' : store.fusionStatus.status }}
+        </span>
+        <span v-if="store.fusionStatus.rowCount" class="text-xs text-gray-400">
+          ({{ store.fusionStatus.rowCount.toLocaleString() }} rows)
+        </span>
+      </div>
+
+      <!-- Unified CSV file info -->
+      <div v-if="store.fusionStatus.unifiedCsv" class="mt-2">
+        <div class="font-medium text-gray-400 text-xs">Unified File</div>
+        <div
+          class="text-xs mt-1 font-mono truncate text-blue-400"
+          :title="store.fusionStatus.unifiedCsvPath || store.fusionStatus.unifiedCsv"
+        >
+          {{ store.fusionStatus.unifiedCsv }}
+        </div>
+      </div>
+
+      <!-- Row breakdown -->
+      <div
+        v-if="store.fusionStatus.status === 'complete' && store.fusionStatus.inWaterRows && store.fusionStatus.surfaceRows"
+        class="mt-2 text-xs text-gray-400"
+      >
+        In-water: {{ store.fusionStatus.inWaterRows.toLocaleString() }} |
+        Surface: {{ store.fusionStatus.surfaceRows.toLocaleString() }}
+      </div>
+
+      <!-- Error message -->
+      <div v-if="store.fusionStatus.error && store.fusionStatus.status !== 'skipped'" class="mt-2 text-xs text-red-400">
+        {{ store.fusionStatus.error }}
+      </div>
+    </div>
+
     <!-- Errors -->
     <div v-if="store.combinedErrors.length > 0" class="space-y-2">
       <div
@@ -123,12 +182,13 @@ import { useQSensorStore } from '@/stores/qsensor'
 
 const store = useQSensorStore()
 
-// Local state
+// * Local state for unified session controls
 const localMissionName = ref(store.globalMissionName || 'Cockpit')
 const localRollIntervalS = ref(60)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const lastOperationError = ref<string | null>(null)
+const lastSessionPath = ref<string | null>(null)
 const sessionFolderName = computed(() => {
   if (!store.unifiedSessionPath) return null
   const normalized = store.unifiedSessionPath.replace(/\\/g, '/')
@@ -136,14 +196,12 @@ const sessionFolderName = computed(() => {
   return parts.pop() || store.unifiedSessionPath
 })
 
-// Sync mission name with store
+// NOTE: Sync mission name with store
 watch(localMissionName, (newVal) => {
   store.globalMissionName = newVal
 })
 
-/**
- *
- */
+// * Start both sensors with shared mission parameters
 async function handleStartBoth() {
   isStarting.value = true
   lastOperationError.value = null
@@ -164,18 +222,27 @@ async function handleStartBoth() {
   }
 }
 
-/**
- *
- */
+// * Stop both sensors and capture any combined errors
 async function handleStopBoth() {
   isStopping.value = true
   lastOperationError.value = null
+
+  // Save session path before it gets cleared by stopBoth
+  lastSessionPath.value = store.unifiedSessionPath
 
   try {
     const result = await store.stopBoth()
 
     if (!result.success) {
       lastOperationError.value = result.errors.join('; ')
+    }
+
+    // Refresh fusion status after stopping (fusion runs automatically)
+    // Give a small delay for fusion to complete
+    if (lastSessionPath.value) {
+      setTimeout(async () => {
+        await store.refreshFusionStatus(lastSessionPath.value!)
+      }, 500)
     }
   } catch (error: any) {
     lastOperationError.value = error.message
@@ -184,10 +251,7 @@ async function handleStopBoth() {
   }
 }
 
-/**
- *
- * @param bytes
- */
+// * Format bytes for unified status summary
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

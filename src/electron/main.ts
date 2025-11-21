@@ -18,6 +18,7 @@ import { setupQSensorControlService } from './services/qsensor-control'
 import { setupQSensorSerialRecordingService } from './services/qsensor-serial-recording'
 import { setupQSensorTimeSyncService } from './services/qsensor-time-sync'
 import { setupSyncMetadataIPC } from './services/qsensor-session-utils'
+import { setupQSensorFusionService } from './services/qsensor-fusion'
 // NOTE: SerialPort is imported in qsensor-serial-recording.ts, not here
 // Importing it here causes native module build issues
 
@@ -138,6 +139,9 @@ console.log('[Main] setupQSensorTimeSyncService() completed')
 
 setupSyncMetadataIPC()
 console.log('[Main] setupSyncMetadataIPC() completed')
+
+setupQSensorFusionService()
+console.log('[Main] setupQSensorFusionService() completed')
 
 console.log('[Main] All IPC service registration completed')
 console.log('[DEBUG] IPC Handlers Registered:', ipcMain.eventNames())

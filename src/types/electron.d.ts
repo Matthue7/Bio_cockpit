@@ -99,6 +99,62 @@ declare global {
       qsensorSerialStopRecording: () => Promise<{ success: boolean; data?: any; error?: string }>
 
       qsensorSerialGetStats: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      qsensorSerialListPorts: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+      // Q-Sensor time sync APIs
+      measureClockOffset: (
+        baseUrl: string
+      ) => Promise<{
+        method: string
+        offsetMs: number | null
+        uncertaintyMs: number | null
+        topsideResponseEnd: string | null
+        error?: string | null
+      }>
+
+      updateSyncMetadata: (
+        sessionRoot: string,
+        timeSync: {
+          method: string
+          offsetMs: number | null
+          uncertaintyMs: number | null
+          measuredAt: string | null
+          error?: string | null
+        }
+      ) => Promise<{ success: boolean; error?: string }>
+
+      // Q-Sensor fusion APIs
+      qsensorGetFusionStatus: (
+        sessionRoot: string
+      ) => Promise<{
+        success: boolean
+        data?: {
+          fusion: {
+            status: 'pending' | 'complete' | 'skipped' | 'failed'
+            unifiedCsv: string | null
+            rowCount: number | null
+            inWaterRows: number | null
+            surfaceRows: number | null
+            completedAt: string | null
+            error: string | null
+          } | null
+          unifiedCsvPath: string | null
+          exists: boolean
+        }
+        error?: string
+      }>
+
+      qsensorTriggerManualFusion: (
+        sessionRoot: string
+      ) => Promise<{
+        success: boolean
+        unifiedCsvPath?: string
+        totalRows?: number
+        inWaterRows?: number
+        surfaceRows?: number
+        error?: string
+      }>
     }
   }
 }

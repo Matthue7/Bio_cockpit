@@ -61,6 +61,18 @@ export const useQSensorStore = defineStore('qsensor', () => {
   const unifiedSessionPath = ref<string | null>(null)
   const globalMissionName = ref('Cockpit')
 
+  // Fusion status (populated after dual-sensor recording stops)
+  const fusionStatus = ref<{
+    status: 'pending' | 'complete' | 'skipped' | 'failed' | null
+    unifiedCsv: string | null
+    unifiedCsvPath: string | null
+    rowCount: number | null
+    inWaterRows: number | null
+    surfaceRows: number | null
+    completedAt: string | null
+    error: string | null
+  } | null>(null)
+
   function clearUnifiedSessionState(): void {
     unifiedSessionId.value = null
     unifiedSessionPath.value = null
@@ -948,6 +960,40 @@ export const useQSensorStore = defineStore('qsensor', () => {
     return { success, errors }
   }
 
+  /**
+   * Refresh fusion status from sync_metadata.json.
+   * Call after recording stops to get unified CSV status.
+   * @param sessionRoot - Optional session root path (defaults to unifiedSessionPath)
+   */
+  async function refreshFusionStatus(sessionRoot?: string): Promise<void> {
+    const path = sessionRoot || unifiedSessionPath.value
+    if (!path) {
+      fusionStatus.value = null
+      return
+    }
+
+    try {
+      const result = await window.electronAPI?.qsensorGetFusionStatus(path)
+      if (result?.success && result.data) {
+        const fusion = result.data.fusion
+        fusionStatus.value = {
+          status: fusion?.status || null,
+          unifiedCsv: fusion?.unifiedCsv || null,
+          unifiedCsvPath: result.data.unifiedCsvPath || null,
+          rowCount: fusion?.rowCount || null,
+          inWaterRows: fusion?.inWaterRows || null,
+          surfaceRows: fusion?.surfaceRows || null,
+          completedAt: fusion?.completedAt || null,
+          error: fusion?.error || null,
+        }
+      } else {
+        fusionStatus.value = null
+      }
+    } catch (error: any) {
+      console.warn('[QSensor Store] Failed to refresh fusion status:', error)
+      fusionStatus.value = null
+    }
+  }
 
   // ========================================
   // COMPUTED GETTERS (Phase 4+)
@@ -1043,6 +1089,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
     stopBoth,
     unifiedSessionId,
     unifiedSessionPath,
+    fusionStatus,
+    refreshFusionStatus,
 
     // Computed getters (Phase 4+)
     surfaceSensor,

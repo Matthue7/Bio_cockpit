@@ -1,27 +1,20 @@
-/**
- * Q-Series Local Recorder (TypeScript)
- *
- * This module implements the local recording and integrity layer for the
- * Q-Series surface reference sensor. It consumes readings from the serial
- * controller and writes chunked CSV files with manifest tracking.
- *
- * ARCHITECTURE:
- * - Event-driven reading consumption from QSeriesSerialController
- * - Buffered chunk writing (periodic flush every 200ms)
- * - Atomic file operations (.tmp → rename pattern)
- * - SHA256 checksum calculation per chunk
- * - Manifest.json generation and incremental updates
- * - Session finalization (combine chunks → session.csv)
- *
- * REFERENCE:
- * - Mirrors Python ChunkWriter behavior from q_sensor_lib
- * - Follows patterns from qsensor-mirror.ts (Pi-side recorder)
- * - Integrates with Phase 2 QSeriesSerialController
- *
- * CSV SCHEMA:
- * timestamp,sensor_id,mode,value,TempC,Vin
- * 2025-11-18T12:00:01.123456+00:00,SN12345,freerun,123.456789,21.34,12.345
- */
+// * Q-Series Local Recorder (TypeScript)
+// * Implements the local recording and integrity layer for the Q-Series surface reference sensor.
+// * Consumes readings from the serial controller and writes chunked CSV files with manifest tracking.
+// * ARCHITECTURE:
+// * - Event-driven reading consumption from QSeriesSerialController
+// * - Buffered chunk writing (periodic flush every 200ms)
+// * - Atomic file operations (.tmp → rename pattern)
+// * - SHA256 checksum calculation per chunk
+// * - Manifest.json generation and incremental updates
+// * - Session finalization (combine chunks → session.csv)
+// * REFERENCE:
+// * - Mirrors Python ChunkWriter behavior from q_sensor_lib
+// * - Follows patterns from qsensor-mirror.ts (Pi-side recorder)
+// * - Integrates with Phase 2 QSeriesSerialController
+// * CSV SCHEMA:
+// * timestamp,sensor_id,mode,value,TempC,Vin
+// * 2025-11-18T12:00:01.123456+00:00,SN12345,freerun,123.456789,21.34,12.345
 
 import * as fs from 'fs/promises'
 import * as crypto from 'crypto'
@@ -32,16 +25,17 @@ import {
   buildSensorDirectoryName,
   buildUnifiedSessionRoot,
   ensureSyncMetadata,
+  readSyncMetadata,
   updateSensorMetadata,
+  updateFusionStatus,
 } from './qsensor-session-utils'
+import { fuseSessionData, areBothSensorsComplete, isFusionComplete } from './qsensor-fusion'
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
-/**
- * Chunk metadata stored in manifest
- */
+// * Chunk metadata stored in manifest
 export interface ChunkMetadata {
   index: number
   name: string
@@ -51,9 +45,7 @@ export interface ChunkMetadata {
   timestamp: string
 }
 
-/**
- * Manifest structure for recording session
- */
+// * Manifest structure for recording session
 export interface RecordingManifest {
   session_id: string
   sensor_id: string
@@ -65,15 +57,14 @@ export interface RecordingManifest {
   total_bytes: number
   schema_version: number
   chunks: ChunkMetadata[]
-  // Session integrity
+  // NOTE: Session integrity
   session_sha256?: string
 }
 
-/**
- * Recording session state
- */
+// * Recording session state
 interface LocalRecordingSession {
   session_id: string
+  sensorId: string
   rootPath: string
   sessionRoot?: string
   started_at: string
@@ -84,23 +75,20 @@ interface LocalRecordingSession {
   flushIntervalId: NodeJS.Timeout | null
   rollIntervalS: number
   lastChunkRollTime: number
+  syncId: string  // UUID for sync marker pairing
 }
 
-/**
- * Parameters for starting a recording session
- */
+// * Parameters for starting a recording session
 export interface StartRecordingParams {
   sensorId: string
   mission: string
   rollIntervalS?: number
   storagePath?: string
-  /** Unified session timestamp for shared directory structure (Phase 4) */
+  // NOTE: Unified session timestamp for shared directory structure (Phase 4)
   unifiedSessionTimestamp?: string
 }
 
-/**
- * Recording statistics
- */
+// * Recording statistics
 export interface RecordingStats {
   sessionId: string
   totalRows: number
@@ -125,16 +113,12 @@ const CHUNK_NAME_PATTERN = /^chunk_(\d{5})\.csv$/
 // Helper Functions
 // ============================================================================
 
-/**
- * Format chunk filename with zero-padded index
- */
+// * Format chunk filename with zero-padded index
 function formatChunkName(index: number): string {
   return `chunk_${index.toString().padStart(5, '0')}.csv`
 }
 
-/**
- * Convert QSeriesReading to CSV row
- */
+// * Convert QSeriesReading to CSV row
 function readingToCSVRow(reading: QSeriesReading): string {
   return [
     reading.timestamp_utc,
@@ -146,42 +130,49 @@ function readingToCSVRow(reading: QSeriesReading): string {
   ].join(',')
 }
 
-/**
- * Calculate SHA256 checksum of a file
- */
+// * Calculate SHA256 checksum of a file
 async function computeSHA256(filePath: string): Promise<string> {
   const buffer = await fs.readFile(filePath)
   return crypto.createHash('sha256').update(buffer).digest('hex')
 }
 
-/**
- * Get file size in bytes
- */
+// * Get file size in bytes
 async function getFileSize(filePath: string): Promise<number> {
   const stats = await fs.stat(filePath)
   return stats.size
 }
 
-/**
- * Atomic file write using .tmp + rename pattern
- */
+// * Atomic file write using .tmp + rename pattern
 async function atomicWrite(targetPath: string, content: string): Promise<void> {
   const tmpPath = targetPath + '.tmp'
   await fs.writeFile(tmpPath, content, 'utf-8')
   await fs.rename(tmpPath, targetPath)
 }
 
+// * Create a sync marker reading for timestamp alignment
+function createSyncMarkerReading(
+  sensorId: string,
+  syncId: string,
+  markerType: 'START' | 'STOP'
+): QSeriesReading {
+  return {
+    timestamp_utc: new Date().toISOString(),
+    timestamp_monotonic_ns: BigInt(Math.floor(performance.now() * 1e6)),
+    sensor_id: sensorId,
+    mode: `SYNC_${markerType}` as any,  // Special mode for sync markers
+    value: parseInt(syncId.slice(0, 8), 16) || 0,  // Use first 8 chars of syncId as numeric
+    TempC: 0,
+    Vin: 0,
+  }
+}
+
 // ============================================================================
 // QSeriesLocalRecorder Class
 // ============================================================================
 
-/**
- * Local recorder for Q-Series surface sensor data.
- *
- * Manages recording sessions, chunk writing, manifest tracking, and
- * session finalization. Designed to mirror Python ChunkWriter behavior
- * and integrate seamlessly with Phase 2 serial controller.
- */
+// * Local recorder for Q-Series surface sensor data.
+// * Manages recording sessions, chunk writing, manifest tracking, and session finalization.
+// * Mirrors Python ChunkWriter behavior while integrating with the Phase 2 serial controller.
 export class QSeriesLocalRecorder {
   private sessions = new Map<string, LocalRecordingSession>()
   private defaultStoragePath: string | null = null
@@ -196,22 +187,12 @@ export class QSeriesLocalRecorder {
     this.clearScheduledInterval = clearIntervalFn
   }
 
-  /**
-   * Set default storage path for recording sessions
-   */
+  // * Set default storage path for recording sessions
   setDefaultStoragePath(path: string): void {
     this.defaultStoragePath = path
   }
 
-  /**
-   * Start a new recording session.
-   *
-   * Creates session directory, initializes manifest, and starts periodic
-   * flush interval.
-   *
-   * @param params - Recording parameters
-   * @returns Session metadata (session_id, started_at)
-   */
+  // * Start a new recording session: create directory, initialize manifest, and start periodic flush.
   async startSession(params: StartRecordingParams): Promise<{ session_id: string; started_at: string }> {
     const sessionId = uuidv4()
     const startedAt = new Date().toISOString()
@@ -261,9 +242,13 @@ export class QSeriesLocalRecorder {
 
     await this.writeManifest(rootPath, manifest)
 
+    // Generate sync marker ID for this session
+    const syncId = uuidv4()
+
     // Create session state
     const session: LocalRecordingSession = {
       session_id: sessionId,
+      sensorId: params.sensorId,
       rootPath,
       sessionRoot,
       started_at: startedAt,
@@ -274,7 +259,13 @@ export class QSeriesLocalRecorder {
       rollIntervalS,
       lastChunkRollTime: Date.now(),
       flushIntervalId: null,
+      syncId,
     }
+
+    // Inject START sync marker as first reading
+    const startMarker = createSyncMarkerReading(params.sensorId, syncId, 'START')
+    session.readingBuffer.push(startMarker)
+    console.log(`[QSeriesLocalRecorder] Injected SYNC_START marker (syncId: ${syncId.slice(0, 8)}...)`)
 
     // Start periodic flush interval
     session.flushIntervalId = this.scheduleInterval(() => {
@@ -288,14 +279,7 @@ export class QSeriesLocalRecorder {
     return { session_id: sessionId, started_at: startedAt }
   }
 
-  /**
-   * Add a reading to the session buffer.
-   *
-   * Readings are buffered in memory and flushed periodically.
-   *
-   * @param sessionId - Session ID
-   * @param reading - Sensor reading
-   */
+  // * Add a reading to the session buffer; flushed periodically or on overflow.
   addReading(sessionId: string, reading: QSeriesReading): void {
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -305,7 +289,7 @@ export class QSeriesLocalRecorder {
 
     session.readingBuffer.push(reading)
 
-    // Buffer overflow protection
+    // NOTE: Buffer overflow protection
     if (session.readingBuffer.length > MAX_BUFFER_SIZE) {
       console.warn(
         `[QSeriesLocalRecorder] Buffer overflow (${session.readingBuffer.length} > ${MAX_BUFFER_SIZE}). Forcing flush.`
@@ -316,14 +300,7 @@ export class QSeriesLocalRecorder {
     }
   }
 
-  /**
-   * Stop recording session and finalize.
-   *
-   * Stops flush interval, writes final chunk, combines chunks into
-   * session.csv, verifies integrity, and cleans up chunk files.
-   *
-   * @param sessionId - Session ID
-   */
+  // * Stop recording session and finalize: stop flushing, finalize chunk, combine CSV, verify, and clean up.
   async stopSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -337,6 +314,11 @@ export class QSeriesLocalRecorder {
       this.clearScheduledInterval(session.flushIntervalId)
       session.flushIntervalId = null
     }
+
+    // Inject STOP sync marker as last reading before final flush
+    const stopMarker = createSyncMarkerReading(session.sensorId, session.syncId, 'STOP')
+    session.readingBuffer.push(stopMarker)
+    console.log(`[QSeriesLocalRecorder] Injected SYNC_STOP marker (syncId: ${session.syncId.slice(0, 8)}...)`)
 
     // Final flush (any remaining buffered data)
     await this.flushChunk(sessionId)
@@ -374,18 +356,18 @@ export class QSeriesLocalRecorder {
     // Delete chunk files (keep manifest.json and session.csv)
     await this.cleanupChunkFiles(session)
 
+    // Attempt fusion if both sensors are complete
+    if (session.sessionRoot) {
+      await this.attemptFusion(session.sessionRoot)
+    }
+
     // Remove session from active sessions
     this.sessions.delete(sessionId)
 
     console.log(`[QSeriesLocalRecorder] Session stopped: ${sessionId}`)
   }
 
-  /**
-   * Get recording statistics for a session.
-   *
-   * @param sessionId - Session ID
-   * @returns Recording stats
-   */
+  // * Get recording statistics for a session.
   async getStats(sessionId: string): Promise<RecordingStats> {
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -405,22 +387,105 @@ export class QSeriesLocalRecorder {
   }
 
   // ========================================================================
+  // Internal Methods: Fusion
+  // ========================================================================
+
+  // * Attempt to fuse both sensor session.csv files into unified output after stopSession completes.
+  private async attemptFusion(sessionRoot: string): Promise<void> {
+    try {
+      // NOTE: Prevent double-fusion
+      const alreadyFused = await isFusionComplete(sessionRoot)
+      if (alreadyFused) {
+        console.log(`[QSeriesLocalRecorder] Fusion already complete for ${sessionRoot}`)
+        return
+      }
+
+      // * Read current sync metadata
+      const syncMetadata = await readSyncMetadata(sessionRoot)
+      if (!syncMetadata) {
+        console.warn(`[QSeriesLocalRecorder] No sync_metadata.json found in ${sessionRoot}`)
+        return
+      }
+
+      // NOTE: Wait until both sensors have completed before running fusion
+      if (!areBothSensorsComplete(syncMetadata)) {
+        console.log(`[QSeriesLocalRecorder] Waiting for both sensors to complete before fusion`)
+        return
+      }
+
+      console.log(`[QSeriesLocalRecorder] Both sensors complete, triggering fusion...`)
+
+      // * Perform fusion
+      const result = await fuseSessionData(sessionRoot, syncMetadata)
+
+      // * Update sync_metadata with fusion status
+      if (result.success && result.unifiedCsvPath) {
+        await updateFusionStatus(sessionRoot, {
+          status: 'complete',
+          unifiedCsv: path.basename(result.unifiedCsvPath),
+          rowCount: result.totalRows ?? null,
+          inWaterRows: result.inWaterRows ?? null,
+          surfaceRows: result.surfaceRows ?? null,
+          completedAt: new Date().toISOString(),
+          error: null,
+        })
+        console.log(`[QSeriesLocalRecorder] ✓ Fusion complete: ${result.totalRows} rows`)
+      } else if (result.error?.includes('skipping unified fusion')) {
+        // NOTE: Single sensor case - mark as skipped so surface recording can finish cleanly
+        await updateFusionStatus(sessionRoot, {
+          status: 'skipped',
+          unifiedCsv: null,
+          rowCount: null,
+          inWaterRows: null,
+          surfaceRows: null,
+          completedAt: new Date().toISOString(),
+          error: result.error,
+        })
+        console.log(`[QSeriesLocalRecorder] Fusion skipped: ${result.error}`)
+      } else {
+        // ! Fusion failed
+        await updateFusionStatus(sessionRoot, {
+          status: 'failed',
+          unifiedCsv: null,
+          rowCount: null,
+          inWaterRows: null,
+          surfaceRows: null,
+          completedAt: new Date().toISOString(),
+          error: result.error ?? 'Unknown fusion error',
+        })
+        console.error(`[QSeriesLocalRecorder] ✗ Fusion failed: ${result.error}`)
+      }
+    } catch (error: any) {
+      console.error(`[QSeriesLocalRecorder] Fusion attempt error:`, error)
+      // NOTE: Try to record the failure in sync_metadata
+      try {
+        await updateFusionStatus(sessionRoot, {
+          status: 'failed',
+          unifiedCsv: null,
+          rowCount: null,
+          inWaterRows: null,
+          surfaceRows: null,
+          completedAt: new Date().toISOString(),
+          error: error.message || 'Unknown error',
+        })
+      } catch {
+        // NOTE: Ignore errors updating metadata
+      }
+    }
+  }
+
+  // ========================================================================
   // Internal Methods: Chunk Writing
   // ========================================================================
 
-  /**
-   * Flush buffered readings to current chunk file.
-   *
-   * This is called periodically (every 200ms) and also on demand for
-   * emergency flushes or session finalization.
-   */
+  // * Flush buffered readings to current chunk file, used on interval and during shutdown.
   private async flushChunk(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) {
       return // Session might have been stopped
     }
 
-    // No-op if buffer is empty
+    // NOTE: No-op if buffer is empty
     if (session.readingBuffer.length === 0) {
       return
     }
@@ -429,10 +494,10 @@ export class QSeriesLocalRecorder {
     const chunkPath = path.join(session.rootPath, chunkName)
     const chunkTmpPath = chunkPath + '.tmp'
 
-    // Check if this is the first write to this chunk (need header)
+    // NOTE: Detect new chunk to decide whether to write header
     const isNewChunk = !(await this.fileExists(chunkPath)) && !(await this.fileExists(chunkTmpPath))
 
-    // Build CSV content from buffer
+    // * Build CSV content from buffer
     let csvContent = ''
 
     if (isNewChunk) {
@@ -445,7 +510,7 @@ export class QSeriesLocalRecorder {
 
     const rowsInBuffer = session.readingBuffer.length
 
-    // Append to chunk file (or create if new)
+    // * Append to chunk file (or create if new)
     if (isNewChunk) {
       // New chunk - write to .tmp
       await fs.writeFile(chunkTmpPath, csvContent, 'utf-8')
@@ -454,7 +519,7 @@ export class QSeriesLocalRecorder {
       await fs.appendFile(chunkTmpPath, csvContent, 'utf-8')
     }
 
-    // Clear buffer
+    // * Clear buffer
     const flushedRows = session.readingBuffer.length
     session.readingBuffer = []
     session.totalRowsFlushed += flushedRows
@@ -463,7 +528,7 @@ export class QSeriesLocalRecorder {
       `[QSeriesLocalRecorder] Flushed ${flushedRows} rows to ${chunkName} (total: ${session.totalRowsFlushed})`
     )
 
-    // Check if we should roll to next chunk (time-based)
+    // NOTE: Check if we should roll to next chunk (time-based)
     const now = Date.now()
     const elapsedSinceRoll = (now - session.lastChunkRollTime) / 1000 // seconds
 
@@ -475,35 +540,33 @@ export class QSeriesLocalRecorder {
     }
   }
 
-  /**
-   * Finalize current chunk: rename .tmp, calculate SHA256, update manifest.
-   */
+  // * Finalize current chunk: rename .tmp, calculate SHA256, and update manifest.
   private async finalizeCurrentChunk(session: LocalRecordingSession): Promise<void> {
     const chunkName = formatChunkName(session.currentChunkIndex)
     const chunkPath = path.join(session.rootPath, chunkName)
     const chunkTmpPath = chunkPath + '.tmp'
 
-    // Check if there's a .tmp file to finalize
+    // NOTE: Only finalize when a .tmp exists
     if (await this.fileExists(chunkTmpPath)) {
       // Rename .tmp → final
       await fs.rename(chunkTmpPath, chunkPath)
     }
 
-    // If chunk file doesn't exist, this was an empty chunk (no-op)
+    // NOTE: If chunk file doesn't exist, this was an empty chunk (no-op)
     if (!(await this.fileExists(chunkPath))) {
       return
     }
 
-    // Calculate SHA256 and file size
+    // * Calculate SHA256 and file size
     const sha256 = await computeSHA256(chunkPath)
     const sizeBytes = await getFileSize(chunkPath)
 
-    // Count rows (excluding header)
+    // NOTE: Count rows (excluding header)
     const content = await fs.readFile(chunkPath, 'utf-8')
     const lines = content.split('\n').filter((line) => line.trim() !== '')
     const rows = lines.length - 1 // Exclude header
 
-    // Update manifest
+    // * Update manifest
     const manifest = await this.readManifest(session.rootPath)
 
     const chunkMetadata: ChunkMetadata = {
@@ -529,19 +592,15 @@ export class QSeriesLocalRecorder {
   // Internal Methods: Session Finalization
   // ========================================================================
 
-  /**
-   * Combine all chunk files into session.csv.
-   *
-   * Reads all chunks in order, writes a single header, then appends all
-   * data rows. Uses atomic write pattern.
-   */
+  // * Combine all chunk files into session.csv using atomic write pattern.
+  // * Writes a single header, then appends all data rows in order.
   private async combineChunksIntoSessionFile(session: LocalRecordingSession): Promise<void> {
     const sessionCsvPath = path.join(session.rootPath, 'session.csv')
     const sessionCsvTmpPath = sessionCsvPath + '.tmp'
 
     console.log(`[QSeriesLocalRecorder] Combining chunks into session.csv...`)
 
-    // Get all chunk files sorted by index
+    // * Get all chunk files sorted by index
     const files = await fs.readdir(session.rootPath)
     const chunkFiles = files
       .filter((name) => CHUNK_NAME_PATTERN.test(name))
@@ -549,7 +608,7 @@ export class QSeriesLocalRecorder {
 
     if (chunkFiles.length === 0) {
       console.warn(`[QSeriesLocalRecorder] No chunks found for session ${session.session_id}`)
-      // Create empty session.csv with just header
+      // NOTE: Create empty session.csv with just header
       await atomicWrite(sessionCsvPath, CSV_HEADER + '\n')
       return
     }
@@ -566,33 +625,29 @@ export class QSeriesLocalRecorder {
         const line = lines[i].trim()
         if (line === '') continue
 
-        // First line of first chunk is header
+        // NOTE: First line of first chunk is header
         if (!headerWritten && i === 0) {
           await fs.appendFile(sessionCsvTmpPath, line + '\n', 'utf-8')
           headerWritten = true
           continue
         }
 
-        // Skip header lines in subsequent chunks
+        // NOTE: Skip header lines in subsequent chunks
         if (i === 0) continue
 
-        // Append data row
+        // * Append data row
         await fs.appendFile(sessionCsvTmpPath, line + '\n', 'utf-8')
         totalRowsWritten++
       }
     }
 
-    // Atomic rename
+    // * Atomic rename
     await fs.rename(sessionCsvTmpPath, sessionCsvPath)
 
     console.log(`[QSeriesLocalRecorder] session.csv created: ${totalRowsWritten} rows`)
   }
 
-  /**
-   * Verify session.csv integrity.
-   *
-   * Checks that row count matches manifest total_rows.
-   */
+  // * Verify session.csv integrity by comparing against manifest row counts.
   private async verifySessionFile(session: LocalRecordingSession): Promise<void> {
     const sessionCsvPath = path.join(session.rootPath, 'session.csv')
     const manifest = await this.readManifest(session.rootPath)
@@ -610,11 +665,7 @@ export class QSeriesLocalRecorder {
     }
   }
 
-  /**
-   * Delete chunk files after successful session.csv creation.
-   *
-   * Keeps manifest.json and session.csv.
-   */
+  // * Delete chunk files after successful session.csv creation while preserving manifest.json and session.csv.
   private async cleanupChunkFiles(session: LocalRecordingSession): Promise<void> {
     const files = await fs.readdir(session.rootPath)
     const chunkFiles = files.filter((name) => CHUNK_NAME_PATTERN.test(name))
@@ -632,27 +683,21 @@ export class QSeriesLocalRecorder {
   // Internal Methods: Manifest I/O
   // ========================================================================
 
-  /**
-   * Read manifest.json from session directory.
-   */
+  // * Read manifest.json from session directory.
   private async readManifest(rootPath: string): Promise<RecordingManifest> {
     const manifestPath = path.join(rootPath, 'manifest.json')
     const content = await fs.readFile(manifestPath, 'utf-8')
     return JSON.parse(content)
   }
 
-  /**
-   * Write manifest.json to session directory (atomic).
-   */
+  // * Write manifest.json to session directory (atomic).
   private async writeManifest(rootPath: string, manifest: RecordingManifest): Promise<void> {
     const manifestPath = path.join(rootPath, 'manifest.json')
     const content = JSON.stringify(manifest, null, 2)
     await atomicWrite(manifestPath, content)
   }
 
-  /**
-   * Check if file exists.
-   */
+  // * Check if file exists.
   private async fileExists(filePath: string): Promise<boolean> {
     try {
       await fs.access(filePath)

@@ -432,6 +432,39 @@ declare global {
        * @param tempDir - Path to the temporary directory to remove
        */
       cleanupTempDir: (tempDir: string) => Promise<void>
+      /**
+       * Get fusion status from sync_metadata.json
+       * @param sessionRoot - Path to the unified session root directory
+       */
+      qsensorGetFusionStatus: (sessionRoot: string) => Promise<{
+        success: boolean
+        data?: {
+          fusion: {
+            status: 'pending' | 'complete' | 'skipped' | 'failed'
+            unifiedCsv: string | null
+            rowCount: number | null
+            inWaterRows: number | null
+            surfaceRows: number | null
+            completedAt: string | null
+            error: string | null
+          } | null
+          unifiedCsvPath: string | null
+          exists: boolean
+        }
+        error?: string
+      }>
+      /**
+       * Manually trigger fusion for an existing session
+       * @param sessionRoot - Path to the unified session root directory
+       */
+      qsensorTriggerManualFusion: (sessionRoot: string) => Promise<{
+        success: boolean
+        unifiedCsvPath?: string
+        totalRows?: number
+        inWaterRows?: number
+        surfaceRows?: number
+        error?: string
+      }>
     }
   }
 }

@@ -1,21 +1,13 @@
-/**
- * Q-Series Serial Controller (TypeScript)
- *
- * This module implements the topside-only direct control layer for the
- * Q-Series surface reference sensor. It manages serial communication,
- * menu navigation, and data acquisition.
- *
- * ARCHITECTURE:
- * - Opens/closes serial port on topside computer
- * - Manages connection lifecycle and state machine
- * - Implements connect/configure/start/stop/health methods
- * - Manages freerun acquisition with event-based reading emission
- * - Integrates with existing Electron serial infrastructure
- *
- * REFERENCE:
- * Based on Python implementation in q_sensor_lib/controller.py
- * Designed to match behavioral semantics while adapting to TypeScript/Node.js patterns
- */
+// * Q-Series Serial Controller (TypeScript)
+// * Topside control layer for the Q-Series surface reference sensor: serial communication, menu navigation, data acquisition.
+// * ARCHITECTURE:
+// * - Opens/closes serial port on topside computer
+// * - Manages connection lifecycle and state machine
+// * - Implements connect/configure/start/stop/health methods
+// * - Manages freerun acquisition with event-based reading emission
+// * - Integrates with existing Electron serial infrastructure
+// * REFERENCE:
+// * Based on Python implementation in q_sensor_lib/controller.py while matching Node/Electron patterns.
 
 import EventEmitter from 'events'
 import { performance } from 'perf_hooks'
@@ -114,25 +106,10 @@ export class InvalidConfigValueError extends Error {
 // QSeriesSerialController Class
 // ============================================================================
 
-/**
- * High-level controller for Q-Series sensor with state management.
- *
- * This class orchestrates all sensor operations:
- * - Connection management (open/close serial port)
- * - Menu navigation and configuration
- * - Data acquisition (freerun and polled modes)
- * - Reading buffer management
- * - Event emission for new readings
- *
- * EVENT EMISSION:
- * - 'reading': Emitted for each parsed reading (QSeriesReading)
- * - 'error': Emitted for errors during acquisition
- * - 'state-change': Emitted when connection state changes
- *
- * THREAD SAFETY:
- * This class is NOT thread-safe. All methods should be called from the
- * main Electron thread. Reading callbacks are invoked synchronously.
- */
+// * High-level controller for Q-Series sensor with state management.
+// * Orchestrates connection, configuration, acquisition, buffering, and event emission.
+// * EVENT EMISSION: 'reading', 'error', 'state-change'.
+// ! THREAD SAFETY: Not thread-safe; call from main Electron thread only.
 export class QSeriesSerialController extends EventEmitter {
   private link: SerialLink | null = null
   private parser: QSeriesProtocolParser
@@ -171,14 +148,7 @@ export class QSeriesSerialController extends EventEmitter {
   // Factory Methods (for test injection)
   // ========================================================================
 
-  /**
-   * Create a serial link instance.
-   * Protected to allow test mocking via spyOn.
-   *
-   * @param port - Serial port name
-   * @param baudRate - Baud rate
-   * @returns SerialLink instance
-   */
+  // * Create a serial link instance (protected for test mocking).
   protected createSerialLink(port: string, baudRate: number): SerialLink {
     const uri = new URL(`serial:${port}?baudrate=${baudRate}`)
     return new SerialLink(uri)
@@ -188,17 +158,7 @@ export class QSeriesSerialController extends EventEmitter {
   // Connection Management
   // ========================================================================
 
-  /**
-   * Connect to sensor and enter configuration menu.
-   *
-   * Opens serial port, forces entry into config menu by sending ESC,
-   * waits for menu prompt, and reads current configuration snapshot.
-   *
-   * @param port - Serial port name (e.g., "/dev/ttyUSB0" or "COM3")
-   * @param baudRate - Baud rate (default 9600)
-   * @throws SerialIOError if port cannot be opened or already connected
-   * @throws MenuTimeoutError if menu prompt not received
-   */
+  // * Connect to sensor and enter configuration menu (forces ESC, waits for menu prompt, reads config snapshot).
   async connect(port: string, baudRate: number = 9600): Promise<void> {
     console.log(`[QSeriesSerial] connect() called - port: ${port}, baudRate: ${baudRate}, currentState: ${this.state}`)
 
@@ -265,11 +225,7 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
-  /**
-   * Disconnect from sensor and clean up resources.
-   *
-   * Stops any acquisition, closes serial port, and resets state.
-   */
+  // * Disconnect from sensor and clean up resources (stop acquisition, close port, reset state).
   async disconnect(): Promise<void> {
     if (this.state === ConnectionState.DISCONNECTED) {
       return
@@ -295,11 +251,7 @@ export class QSeriesSerialController extends EventEmitter {
     console.log('[QSeriesSerial] Disconnected')
   }
 
-  /**
-   * Reconnect to sensor using last known port/baud.
-   *
-   * @throws SerialIOError if no previous connection exists
-   */
+  // * Reconnect to sensor using last known port/baud.
   async reconnect(): Promise<void> {
     if (!this.lastPort) {
       throw new SerialIOError('Cannot reconnect: no previous connection')
@@ -318,11 +270,7 @@ export class QSeriesSerialController extends EventEmitter {
   // Configuration Methods
   // ========================================================================
 
-  /**
-   * Get current sensor configuration.
-   *
-   * @throws SerialIOError if not in CONFIG_MENU state
-   */
+  // * Get current sensor configuration (requires CONFIG_MENU state).
   getConfig(): QSeriesSensorConfig {
     if (this.state !== ConnectionState.CONFIG_MENU) {
       throw new SerialIOError(`Cannot get config in state ${this.state}. Must be in CONFIG_MENU.`)
@@ -335,13 +283,7 @@ export class QSeriesSerialController extends EventEmitter {
     return this.config
   }
 
-  /**
-   * Set number of readings to average.
-   *
-   * @param n - Averaging count (1-65535)
-   * @throws InvalidConfigValueError if n is out of range
-   * @throws SerialIOError if not in CONFIG_MENU state
-   */
+  // * Set number of readings to average (1-65535) while in CONFIG_MENU.
   async setAveraging(n: number): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -385,12 +327,7 @@ export class QSeriesSerialController extends EventEmitter {
     return this.getConfig()
   }
 
-  /**
-   * Set ADC sample rate.
-   *
-   * @param rateHz - Sample rate in Hz (must be in {4, 8, 16, 33, 62, 125, 250, 500})
-   * @throws InvalidConfigValueError if rate is invalid
-   */
+  // * Set ADC sample rate (valid: 4, 8, 16, 33, 62, 125, 250, 500 Hz) while in CONFIG_MENU.
   async setAdcRate(rateHz: number): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -435,13 +372,7 @@ export class QSeriesSerialController extends EventEmitter {
     return this.getConfig()
   }
 
-  /**
-   * Set operating mode (freerun or polled).
-   *
-   * @param mode - "freerun" for continuous streaming, "polled" for on-demand queries
-   * @param tag - Single uppercase character A-Z (required if mode="polled")
-   * @throws InvalidConfigValueError if mode/tag is invalid
-   */
+  // * Set operating mode (freerun or polled). Polled requires a single uppercase tag.
   async setMode(mode: QSeriesMode, tag: string | null = null): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -503,15 +434,7 @@ export class QSeriesSerialController extends EventEmitter {
   // Acquisition Control
   // ========================================================================
 
-  /**
-   * Exit menu and start data acquisition in configured mode.
-   *
-   * Sends 'X' command which triggers device reset. After reset, device
-   * enters run mode (freerun or polled) based on stored configuration.
-   *
-   * @param pollHz - Polling rate for polled mode (1-15 Hz recommended). Ignored in freerun.
-   * @throws SerialIOError if not in CONFIG_MENU state
-   */
+  // * Exit menu and start data acquisition in configured mode (freerun or polled).
   async startAcquisition(pollHz: number = 1.0): Promise<void> {
     this.ensureInMenu()
 
@@ -547,13 +470,7 @@ export class QSeriesSerialController extends EventEmitter {
     console.log(`[QSeriesSerial] Acquisition started in ${this.config.mode} mode`)
   }
 
-  /**
-   * Pause acquisition and enter menu.
-   *
-   * Stops acquisition loop, sends ESC to enter menu.
-   *
-   * @throws SerialIOError if not in acquisition mode
-   */
+  // * Pause acquisition and enter menu (stops loops, sends ESC).
   async pause(): Promise<void> {
     if (this.state !== ConnectionState.ACQ_FREERUN && this.state !== ConnectionState.ACQ_POLLED) {
       throw new SerialIOError(`Cannot pause from state ${this.state}. Must be acquiring.`)
@@ -572,11 +489,7 @@ export class QSeriesSerialController extends EventEmitter {
     console.log('[QSeriesSerial] Acquisition paused, in menu')
   }
 
-  /**
-   * Resume acquisition from paused state.
-   *
-   * @throws SerialIOError if not in PAUSED state
-   */
+  // * Resume acquisition from paused state.
   async resume(): Promise<void> {
     if (this.state !== ConnectionState.PAUSED) {
       throw new SerialIOError(`Cannot resume from state ${this.state}. Must be PAUSED.`)
@@ -592,11 +505,7 @@ export class QSeriesSerialController extends EventEmitter {
     await this.startAcquisition(this.lastPollHz)
   }
 
-  /**
-   * Stop acquisition and return to CONFIG_MENU state.
-   *
-   * @throws SerialIOError if not in acquisition or paused state
-   */
+  // * Stop acquisition and return to CONFIG_MENU state.
   async stop(): Promise<void> {
     if (
       this.state !== ConnectionState.ACQ_FREERUN &&
@@ -623,9 +532,7 @@ export class QSeriesSerialController extends EventEmitter {
   // Health / Status
   // ========================================================================
 
-  /**
-   * Get current health/status data.
-   */
+  // * Get current health/status data.
   getHealth(): HealthData {
     const lastReadingAge = this.lastReadingTimestamp ? Date.now() - this.lastReadingTimestamp : undefined
 
@@ -637,23 +544,17 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
-  /**
-   * Check if controller is connected to sensor.
-   */
+  // * Check if controller is connected to sensor.
   isConnected(): boolean {
     return this.link !== null && this.link.isOpen && this.state !== ConnectionState.DISCONNECTED
   }
 
-  /**
-   * Get current connection state.
-   */
+  // * Get current connection state.
   getState(): ConnectionState {
     return this.state
   }
 
-  /**
-   * Get sensor ID.
-   */
+  // * Get sensor ID.
   getSensorId(): string {
     return this.sensorId
   }

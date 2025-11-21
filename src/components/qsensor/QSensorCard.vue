@@ -40,17 +40,13 @@ import { isSensorRecording } from '@/stores/qsensor-common'
 import type { QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
-  /**
-   *
-   */
+  // * Display title for the card
   title: string
-  /**
-   *
-   */
+  // * Sensor state rendered in the card
   sensor: QSensorState
 }>()
 
-// Backend type badge
+// * Backend type badge
 const backendLabel = computed(() => {
   return props.sensor.backendType === 'http' ? 'HTTP (Pi)' : 'Serial (Topside)'
 })
@@ -59,7 +55,7 @@ const backendBadgeClass = computed(() => {
   return props.sensor.backendType === 'http' ? 'bg-blue-600/30 text-blue-400' : 'bg-purple-600/30 text-purple-400'
 })
 
-// Status indicator
+// * Status indicator styling
 const statusIndicatorClass = computed(() => {
   if (isSensorRecording(props.sensor)) {
     return 'bg-red-500 animate-pulse'

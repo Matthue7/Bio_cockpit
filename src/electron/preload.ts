@@ -156,6 +156,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       error?: string | null
     }
   ) => ipcRenderer.invoke('qsensor:update-sync-metadata', sessionRoot, timeSync),
+  // Q-Sensor fusion
+  qsensorGetFusionStatus: (sessionRoot: string) =>
+    ipcRenderer.invoke('qsensor:get-fusion-status', sessionRoot),
+  qsensorTriggerManualFusion: (sessionRoot: string) =>
+    ipcRenderer.invoke('qsensor:trigger-manual-fusion', sessionRoot),
   getElectronLogContent: (logName: string) => ipcRenderer.invoke('get-electron-log-content', logName),
   deleteElectronLog: (logName: string) => ipcRenderer.invoke('delete-electron-log', logName),
   deleteOldElectronLogs: () => ipcRenderer.invoke('delete-old-electron-logs'),

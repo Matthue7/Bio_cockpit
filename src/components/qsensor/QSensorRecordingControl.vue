@@ -89,17 +89,11 @@ import { isSensorRecording } from '@/stores/qsensor-common'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
-  /**
-   *
-   */
+  // * Sensor identifier to control
   sensorId: QSensorId
-  /**
-   *
-   */
+  // * Sensor state backing this UI
   sensor: QSensorState
-  /**
-   *
-   */
+  // * Mission name associated with this recording
   mission: string
 }>()
 
@@ -111,21 +105,18 @@ const emit = defineEmits<{
 
 const store = useQSensorStore()
 
-// Recording state
+// * Recording state
 const isStarting = ref(false)
 const isStopping = ref(false)
 
-// Local recording parameters with defaults
-// Both backends support up to 500 Hz for synchronized sampling
+// * Local recording parameters with defaults (both backends support up to 500 Hz)
 const localRateHz = ref(500)
 const localRollIntervalS = ref(60)
 
-// Computed for current recording state
+// * Computed for current recording state
 const isRecording = computed(() => isSensorRecording(props.sensor))
 
-/**
- *
- */
+// * Start recording request handler
 async function handleStart() {
   isStarting.value = true
 
@@ -148,9 +139,7 @@ async function handleStart() {
   }
 }
 
-/**
- *
- */
+// * Stop recording request handler
 async function handleStop() {
   isStopping.value = true
 
@@ -169,10 +158,7 @@ async function handleStop() {
   }
 }
 
-/**
- *
- * @param iso
- */
+// * Format ISO timestamp for session info display
 function formatTimestamp(iso: string): string {
   const date = new Date(iso)
   return date.toLocaleTimeString()

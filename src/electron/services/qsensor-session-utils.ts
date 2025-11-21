@@ -21,6 +21,32 @@ export interface SyncMetadataSensorInfo {
   bytesRecorded?: number
 }
 
+export interface FusionStatus {
+  status: 'pending' | 'complete' | 'skipped' | 'failed'
+  unifiedCsv: string | null
+  rowCount: number | null
+  inWaterRows: number | null
+  surfaceRows: number | null
+  completedAt: string | null
+  error: string | null
+}
+
+export interface SyncMarker {
+  syncId: string                    // UUID for marker pairing
+  type: 'START' | 'STOP'
+  inWaterTimestamp: string | null   // ISO timestamp from in-water sensor
+  surfaceTimestamp: string | null   // ISO timestamp from surface sensor
+  offsetMs: number | null           // Computed offset at this marker
+  quality: 'measured' | 'synthetic' // Source quality indicator
+}
+
+export interface DriftModel {
+  type: 'constant' | 'linear'       // Model used for correction
+  startOffsetMs: number             // Offset at session start
+  driftRateMsPerMin?: number        // ms drift per minute (for linear)
+  endOffsetMs?: number              // Offset at session end (for linear)
+}
+
 export interface SyncMetadata {
   schemaVersion: number
   mission: string
@@ -37,7 +63,10 @@ export interface SyncMetadata {
     uncertaintyMs: number | null
     measuredAt: string | null
     error: string | null
+    markers?: SyncMarker[]          // Detected sync markers
+    driftModel?: DriftModel         // Computed drift correction model
   }
+  fusion?: FusionStatus
 }
 
 export function buildUnifiedSessionRoot(basePath: string, mission: string, unifiedTimestamp: string): string {
@@ -143,10 +172,17 @@ export function getSyncMetadataPath(sessionRoot: string): string {
   return path.join(sessionRoot, SYNC_METADATA_FILENAME)
 }
 
-/**
- * Setup IPC handler for updating sync metadata timeSync field.
- * Phase 3: Enables renderer to update time sync data after measurement.
- */
+export async function updateFusionStatus(
+  sessionRoot: string,
+  fusionStatus: FusionStatus
+): Promise<void> {
+  await updateSyncMetadata(sessionRoot, (metadata) => {
+    metadata.fusion = fusionStatus
+  })
+}
+
+// * Setup IPC handler for updating sync metadata timeSync field.
+// NOTE: Renderer uses this to push measured time sync values after capture.
 export function setupSyncMetadataIPC(): void {
   ipcMain.handle(
     'qsensor:update-sync-metadata',

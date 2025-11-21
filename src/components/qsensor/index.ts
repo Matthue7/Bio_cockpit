@@ -1,6 +1,4 @@
-/**
- * Q-Sensor component exports for Phase 4 dual-sensor UI architecture.
- */
+// * Q-Sensor component exports for Phase 4 dual-sensor UI architecture.
 
 export { default as QSensorCard } from './QSensorCard.vue'
 export { default as QSensorConnectionControl } from './QSensorConnectionControl.vue'
