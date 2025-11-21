@@ -4,6 +4,7 @@
 
 <div align="center">
   <h1>Cockpit - A Modern Ground Control Software</h1>
+  <h3>Biospherical Instruments Fork with Q-Sensor Integration</h3>
 
   <p>
     <a href="https://docs.bluerobotics.com/cockpit">🌐 Live Demo</a> •
@@ -12,6 +13,16 @@
     <a href="https://discuss.bluerobotics.com/c/bluerobotics-software/cockpit">💬 Community</a>
   </p>
 </div>
+
+---
+
+## Fork Information
+
+This repository is a fork of [Blue Robotics' Cockpit](https://github.com/bluerobotics/cockpit), customized by **Biospherical Instruments** to add dual-sensor Q-Sensor integration for scientific data acquisition.
+
+All original Cockpit functionality remains intact. The upstream license (AGPL-3.0 / Commercial) applies to both the original code and BSI extensions.
+
+**Upstream repository**: [github.com/bluerobotics/cockpit](https://github.com/bluerobotics/cockpit)
 
 <br>
 
@@ -44,6 +55,33 @@ Cockpit is a web-based ground control station that aims to improve how you inter
 - **🎮 Joystick Support**: Extensive gamepad support with customizable button mappings
 - **🔧 Extensible**: Advanced plugin system with DIY widgets, custom actions, data-lake variables, and input elements
 - **📊 Data Rich**: Comprehensive telemetry logging and real-time data visualization
+
+---
+
+## Q-Sensor Integration (BSI Extensions)
+
+This fork adds a **dual-sensor scientific data acquisition system** for Biospherical Instruments Q-Sensors:
+
+### Dual-Sensor Architecture
+
+- **In-water sensor**: Q-Sensor attached to BlueROV2, accessed via BlueOS `Q_Sensor_API` extension
+- **Surface sensor**: Reference Q-Sensor connected to topside computer via USB serial
+
+### Key Features
+
+- **Simultaneous recording**: Both sensors record in parallel with synchronized timestamps
+- **Live mirroring**: In-water data continuously mirrored from ROV to topside during recording
+- **Automatic fusion**: Data from both sensors merged into unified wide-format CSV
+- **Time synchronization**: Offset correction and drift modeling for scientific timing accuracy
+- **Data integrity**: SHA256 checksums and atomic file operations throughout the pipeline
+
+### Technical Documentation
+
+For implementation details, see the [docs/](docs/) directory:
+
+- [Architecture](docs/ARCHITECTURE.md) - System overview and service descriptions
+- [Dual Sensor Pipeline](docs/DUAL_SENSOR_PIPELINE.md) - Data flow and processing details
+- [Time Sync and Fusion](docs/TIME_SYNC_AND_FUSION.md) - Time alignment and fusion algorithm
 
 ---
 
@@ -312,10 +350,16 @@ docker-compose -f sim.yml --profile ardusub up
 
 ## 📚 Documentation & Support
 
+### Cockpit Documentation
 - **📖 User Documentation**: [blueos.cloud/docs/extensions/cockpit](https://blueos.cloud/cockpit/docs)
 - **💬 Community Forum**: [discuss.bluerobotics.com](https://discuss.bluerobotics.com/c/bluerobotics-software/cockpit)
 - **🐛 Issue Tracker**: [GitHub Issues](https://github.com/bluerobotics/cockpit/issues)
 - **💡 Feature Requests**: [GitHub Discussions](https://github.com/bluerobotics/cockpit/discussions)
+
+### Q-Sensor Integration Documentation
+- **🏗️ Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **🔄 Data Pipeline**: [docs/DUAL_SENSOR_PIPELINE.md](docs/DUAL_SENSOR_PIPELINE.md)
+- **⏱️ Time Sync & Fusion**: [docs/TIME_SYNC_AND_FUSION.md](docs/TIME_SYNC_AND_FUSION.md)
 
 ---
 
