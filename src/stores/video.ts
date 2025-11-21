@@ -410,9 +410,20 @@ export const useVideoStore = defineStore('video', () => {
     // On Electron, we can get the size of the video output file in real time
     // This is useful to detect if the output file is growing, which is an indication that the recording is still ongoing.
     // On Web, we can only know if the number of chunks is growing, which is an indication that the recording is still ongoing.
+    // We also need to clear the interval if it already exists, to avoid multiple intervals running at the same time.
+    clearInterval(recordingMonitors[streamName])
+    delete recordingMonitors[streamName]
     if (window.electronAPI) {
       console.info(`Starting electron recording monitor for stream '${streamName}'.`)
       recordingMonitors[streamName] = setInterval(async () => {
+        // Check if the stream is still recording before proceeding with checks
+        if (!activeStreams.value[streamName] || !activeStreams.value[streamName]!.mediaRecorder) {
+          const msg = `Recording for stream '${streamName}' has stopped. Stopping health monitor for this stream.`
+          showDialog({ message: msg, variant: 'warning' })
+          clearInterval(recordingMonitors[streamName])
+          delete recordingMonitors[streamName]
+          return
+        }
         const fileStats = await window.electronAPI?.getFileStats(fileName, ['videos'])
         if (!fileStats || !fileStats.exists) {
           // eslint-disable-next-line
@@ -432,6 +443,14 @@ export const useVideoStore = defineStore('video', () => {
     } else {
       console.info(`Starting web recording monitor for stream '${streamName}'.`)
       recordingMonitors[streamName] = setInterval(async () => {
+        // Check if the stream is still recording before proceeding with checks
+        if (!activeStreams.value[streamName] || !activeStreams.value[streamName]!.mediaRecorder) {
+          const msg = `Recording for stream '${streamName}' has stopped. Stopping health monitor for this stream.`
+          showDialog({ message: msg, variant: 'warning' })
+          clearInterval(recordingMonitors[streamName])
+          delete recordingMonitors[streamName]
+          return
+        }
         // @ts-ignore: localForage is not defined on the StorageDB interface
         const numberOfChunks = await tempVideoStorage.localForage.length()
         const lastKnownNumberOfChunks = unprocessedVideos.value[recordingHash].lastKnownNumberOfChunks

@@ -51,16 +51,12 @@ import {
   Velocity,
 } from '@/libs/vehicle/types'
 import { type MissionLoadingCallback, type Waypoint, defaultLoadingCallback } from '@/types/mission'
+import { DataLakeVariable } from '@/types/widgets'
 
 import { flattenData } from '../common/data-flattener'
 import * as Vehicle from '../vehicle'
 
 export const MAVLINK_MESSAGE_INTERVALS_STORAGE_KEY = 'cockpit-mavlink-message-intervals'
-
-const preDefinedDataLakeVariables = {
-  cameraTilt: { id: 'cameraTiltDeg', name: 'Camera Tilt Degrees', type: 'number' },
-  autopilotSystemId: { id: 'autopilotSystemId', name: 'Autopilot System ID', type: 'number' },
-}
 
 /**
  * Generic MAVLink vehicle
@@ -94,6 +90,8 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
   onOutgoingMAVLinkMessage = new SignalTyped()
   _flying = false
 
+  shouldCreateDatalakeVariablesFromOtherSystems = false
+
   protected currentSystemId = 1
 
   /**
@@ -118,7 +116,7 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
     this.createPredefinedDataLakeVariables()
 
     // Set the system ID in the data-lake
-    setDataLakeVariableData(preDefinedDataLakeVariables.autopilotSystemId.id, systemId)
+    setDataLakeVariableData(this.preDefinedDataLakeVariables.autopilotSystemId.id, systemId)
   }
 
   /**
@@ -316,39 +314,16 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
     const { system_id, component_id } = mavlink_message.header
 
     if (system_id !== this.currentSystemId || component_id !== 1) {
+      // For non-main systems, only inject variables from the MAVLink messages into the DataLake if the user wants to
+      if (this.shouldCreateDatalakeVariablesFromOtherSystems) {
+        this.addPackageVariablesToDataLake(mavlink_message)
+      }
+
       return
     }
 
-    const messageType = mavlink_message.message.type
-
-    // Inject variables from the MAVLink messages into the DataLake
-    if (['NAMED_VALUE_FLOAT', 'NAMED_VALUE_INT'].includes(messageType)) {
-      // Special handling for NAMED_VALUE_FLOAT/NAMED_VALUE_INT messages
-      const name = (mavlink_message.message.name as string[]).join('').replace(/\0/g, '')
-      const path = `${messageType}/${name}`
-      if (getDataLakeVariableInfo(path) === undefined) {
-        createDataLakeVariable({ id: path, name: path, type: 'number' })
-      }
-      setDataLakeVariableData(path, mavlink_message.message.value)
-
-      // Create duplicated variables for legacy purposes (that was how they were stored in the old generic-variables system)
-      const oldVariablePath = mavlink_message.message.name.join('').replaceAll('\x00', '')
-      if (getDataLakeVariableInfo(oldVariablePath) === undefined) {
-        createDataLakeVariable({ id: oldVariablePath, name: oldVariablePath, type: 'number' })
-      }
-      setDataLakeVariableData(oldVariablePath, mavlink_message.message.value)
-    } else {
-      // For all other messages, use the flattener
-      const flattened = flattenData(mavlink_message.message)
-      flattened.forEach(({ path, value }) => {
-        if (value === null) return
-        if (typeof value !== 'string' && typeof value !== 'number') return
-        if (getDataLakeVariableInfo(path) === undefined) {
-          createDataLakeVariable({ id: path, name: path, type: typeof value === 'string' ? 'string' : 'number' })
-        }
-        setDataLakeVariableData(path, value)
-      })
-    }
+    // For the main vehicle, always inject variables from the MAVLink messages into the DataLake
+    this.addPackageVariablesToDataLake(mavlink_message)
 
     // Update our internal messages
     this._messages.set(mavlink_message.message.type, { ...mavlink_message.message, epoch: new Date().getTime() })
@@ -403,7 +378,8 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
         } else {
           pitch = Math.asin(sinp)
         }
-        setDataLakeVariableData(preDefinedDataLakeVariables.cameraTilt.id, degrees(pitch))
+        setDataLakeVariableData(this.preDefinedDataLakeVariables.cameraTilt.id, degrees(pitch))
+        setDataLakeVariableData(this.preDefinedDataLakeVariables.cameraTiltLegacy.id, degrees(pitch))
         break
       }
       case MAVLinkType.GLOBAL_POSITION_INT: {
@@ -772,6 +748,69 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
     }
 
     sendMavlinkMessage(heartbeatMessage)
+  }
+
+  /**
+   * Send system time from GCS
+   */
+  sendSystemTime(): void {
+    const time_since_gcs_start_ms = performance.now()
+    const systemTimeMessage: Message.SystemTime = {
+      type: MAVLinkType.SYSTEM_TIME,
+      time_unix_usec: Math.floor((performance.timeOrigin + time_since_gcs_start_ms) * 1000),
+      time_boot_ms: Math.floor(time_since_gcs_start_ms),
+    }
+    sendMavlinkMessage(systemTimeMessage)
+  }
+
+  /**
+   * Measure network latency to vehicle using TIMESYNC message
+   * @returns {Promise<void>}
+   */
+  async measureLatency(): Promise<void> {
+    const time_sent_ns = Math.floor(performance.now() * 1e6)
+    let receivedTimesync = false
+    let timeoutReached = false
+    let latencyNs = 0
+    const timeout = 5000
+
+    const timesyncHandler = (pack: Package): void => {
+      const timesync = pack.message as Message.Timesync
+      if (timesync.ts1 === time_sent_ns) {
+        const time_received_ns = Math.floor(performance.now() * 1e6)
+        // we could use the tc1 value to calculate the latency, but I think that would give us the
+        // GCS -> vehicle latency, not the round trip latency.
+        latencyNs = (time_received_ns - time_sent_ns) / 2
+        receivedTimesync = true
+      }
+    }
+
+    const timeSyncMessage: Message.Timesync = {
+      type: MAVLinkType.TIMESYNC,
+      ts1: time_sent_ns,
+      tc1: 0,
+      target_system: this.currentSystemId,
+      target_component: 1,
+    }
+    const startTime = performance.now()
+    this.onIncomingMAVLinkMessage.add(MAVLinkType.TIMESYNC, timesyncHandler)
+
+    sendMavlinkMessage(timeSyncMessage)
+
+    while (!timeoutReached && !receivedTimesync) {
+      await sleep(100)
+      timeoutReached = performance.now() - startTime > timeout
+    }
+
+    this.onIncomingMAVLinkMessage.remove(MAVLinkType.TIMESYNC, timesyncHandler)
+
+    if (!receivedTimesync) {
+      console.warn(`No TIMESYNC response received before timeout (${timeout / 1000}s).`)
+      latencyNs = 0
+    }
+
+    const latencyMs = latencyNs * 1e-6
+    setDataLakeVariableData(this.preDefinedDataLakeVariables.networkLatencyMs.id, latencyMs)
   }
 
   /**
@@ -1358,11 +1397,28 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
   }
 
   /**
+   * Pre-defined data-lake variables related to the vehicle
+   * @returns {Record<string, DataLakeVariable>} The variables
+   */
+  private get preDefinedDataLakeVariables(): Record<string, DataLakeVariable> {
+    const vehiclePath = `/mavlink/${this.currentSystemId}/1`
+    const vehicleName = `MAVLink / System: ${this.currentSystemId} / Component: 1`
+    /* eslint-disable vue/max-len, prettier/prettier, max-len */
+    return {
+      cameraTiltLegacy: { id: 'cameraTiltDeg', name: '(Legacy) Camera Tilt Degrees', type: 'number' },
+      autopilotSystemId: { id: 'autopilotSystemId', name: 'Autopilot System ID', type: 'number' },
+      cameraTilt: { id: `${vehiclePath}/cameraTiltDeg`, name: `Camera Tilt [degrees] (${vehicleName})`, type: 'number' },
+      networkLatencyMs: { id: `${vehiclePath}/networkLatencyMs`, name: `Network Latency [ms] (${vehicleName})`, type: 'number' },
+    }
+    /* eslint-enable vue/max-len, prettier/prettier, max-len */
+  }
+
+  /**
    * Create data-lake variables for the vehicle
    */
   createPredefinedDataLakeVariables(): void {
     // Register BlueOS variables in the data lake
-    Object.values(preDefinedDataLakeVariables).forEach((variable) => {
+    Object.values(this.preDefinedDataLakeVariables).forEach((variable) => {
       if (!Object.values(getAllDataLakeVariablesInfo()).find((v) => v.id === variable.id)) {
         // @ts-ignore: The type is right, only being incorrectly inferred by TS
         createDataLakeVariable({ ...variable, persistent: false, persistValue: false })
@@ -1383,6 +1439,69 @@ export abstract class MAVLinkVehicle<Modes> extends Vehicle.AbstractVehicle<Mode
       }
     } catch (error) {
       console.error('Error creating ArduPilot system ID fallback:', error)
+    }
+  }
+
+  /**
+   * Inject variable(s) from the MAVLink package into the DataLake
+   * @param { Package } mavlinkPackage
+   */
+  private addPackageVariablesToDataLake(mavlinkPackage: Package): void {
+    const messageType = mavlinkPackage.message.type
+    const { system_id: messageSystemId, component_id: messageComponentId } = mavlinkPackage.header
+    const prefix = `/mavlink/${messageSystemId}/${messageComponentId}`
+
+    // Inject variables from the MAVLink messages into the DataLake
+    if (['NAMED_VALUE_FLOAT', 'NAMED_VALUE_INT'].includes(messageType)) {
+      // Special handling for NAMED_VALUE_FLOAT/NAMED_VALUE_INT messages
+      const name = `${(mavlinkPackage.message.name as string[])
+        .join('')
+        .replace(/\0/g, '')} (MAVLink / System: ${messageSystemId} / Component: ${messageComponentId})`
+      const path = `${prefix}/${messageType}/${name}`
+      if (getDataLakeVariableInfo(path) === undefined) {
+        createDataLakeVariable({ id: path, name: name, type: 'number' })
+      }
+      setDataLakeVariableData(path, mavlinkPackage.message.value)
+
+      if (messageSystemId !== this.currentSystemId || messageComponentId !== 1) {
+        // Create duplicated variables for legacy purposes (that was how they were stored in the old generic-variables system)
+        const oldVariablePath = mavlinkPackage.message.name.join('').replaceAll('\x00', '')
+        if (getDataLakeVariableInfo(oldVariablePath) === undefined) {
+          createDataLakeVariable({ id: oldVariablePath, name: `(Legacy) ${oldVariablePath}`, type: 'number' })
+        }
+        setDataLakeVariableData(oldVariablePath, mavlinkPackage.message.value)
+      }
+    } else {
+      // For all other messages, use the flattener
+      const flattened = flattenData(mavlinkPackage.message)
+      flattened.forEach(({ path, value }) => {
+        if (value === null) return
+        if (typeof value !== 'string' && typeof value !== 'number') return
+
+        if (messageSystemId !== this.currentSystemId || messageComponentId !== 1) {
+          // Create the variable in the old style path for legacy purposes (that was how they were stored in the old generic-variables system)
+          const oldStylePath = `${path}`
+          if (getDataLakeVariableInfo(oldStylePath) === undefined) {
+            createDataLakeVariable({
+              id: oldStylePath,
+              name: `(Legacy) ${path}`,
+              type: typeof value === 'string' ? 'string' : 'number',
+            })
+          }
+          setDataLakeVariableData(oldStylePath, value)
+        }
+
+        // Create the variable in the new style path
+        const newStylePath = `${prefix}/${path}`
+        if (getDataLakeVariableInfo(newStylePath) === undefined) {
+          createDataLakeVariable({
+            id: newStylePath,
+            name: `${path} (MAVLink / System: ${messageSystemId} / Component: ${messageComponentId})`,
+            type: typeof value === 'string' ? 'string' : 'number',
+          })
+        }
+        setDataLakeVariableData(newStylePath, value)
+      })
     }
   }
 }
