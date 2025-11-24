@@ -85,6 +85,8 @@ export interface QSensorSessionInfo {
    *
    */
   mission: string
+  /** Shared sync marker identifier for dual-sensor alignment */
+  syncId?: string
   /**
    *
    */

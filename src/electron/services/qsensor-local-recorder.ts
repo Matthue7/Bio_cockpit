@@ -86,6 +86,8 @@ export interface StartRecordingParams {
   storagePath?: string
   // NOTE: Unified session timestamp for shared directory structure (Phase 4)
   unifiedSessionTimestamp?: string
+  // Optional externally-coordinated syncId for paired sensors
+  syncId?: string
 }
 
 // * Recording statistics
@@ -193,10 +195,11 @@ export class QSeriesLocalRecorder {
   }
 
   // * Start a new recording session: create directory, initialize manifest, and start periodic flush.
-  async startSession(params: StartRecordingParams): Promise<{ session_id: string; started_at: string }> {
+  async startSession(params: StartRecordingParams): Promise<{ session_id: string; started_at: string; syncId: string }> {
     const sessionId = uuidv4()
     const startedAt = new Date().toISOString()
     const rollIntervalS = params.rollIntervalS ?? DEFAULT_ROLL_INTERVAL_S
+    const syncId = params.syncId ?? uuidv4()
 
     // Resolve storage path
     const storagePath = params.storagePath ?? this.defaultStoragePath
@@ -242,9 +245,6 @@ export class QSeriesLocalRecorder {
 
     await this.writeManifest(rootPath, manifest)
 
-    // Generate sync marker ID for this session
-    const syncId = uuidv4()
-
     // Create session state
     const session: LocalRecordingSession = {
       session_id: sessionId,
@@ -276,7 +276,7 @@ export class QSeriesLocalRecorder {
 
     this.sessions.set(sessionId, session)
 
-    return { session_id: sessionId, started_at: startedAt }
+    return { session_id: sessionId, started_at: startedAt, syncId }
   }
 
   // * Add a reading to the session buffer; flushed periodically or on overflow.

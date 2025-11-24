@@ -6,6 +6,7 @@ import { app, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
+import { v4 as uuidv4 } from 'uuid'
 import store from './config-store'
 import {
   buildSensorDirectoryName,
@@ -31,9 +32,44 @@ interface MirrorSession {
   lastSync: string | null
   intervalId: NodeJS.Timeout | null
   running: boolean
+  syncId: string | null
 }
 
 const activeSessions = new Map<string, MirrorSession>()
+
+// * Inject a sync marker into the Pi recording via /record/sync-marker.
+async function injectPiSyncMarker(session: MirrorSession, syncId: string, markerType: 'START' | 'STOP'): Promise<boolean> {
+  const syncUrl = `http://${session.vehicleAddress}:9150/record/sync-marker`
+
+  try {
+    const response = await fetch(syncUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: session.sessionId,
+        sync_id: syncId,
+        marker_type: markerType,
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+
+    if (!response.ok) {
+      console.warn(
+        `[QSensor Mirror] Failed to inject ${markerType} marker: HTTP ${response.status} ${response.statusText}`
+      )
+      return false
+    }
+
+    const result = await response.json().catch(() => null)
+    console.log(
+      `[QSensor Mirror] ${markerType} marker injected (syncId=${syncId.slice(0, 8)}..., ts=${result?.timestamp ?? 'unknown'})`
+    )
+    return true
+  } catch (error: any) {
+    console.warn(`[QSensor Mirror] Failed to inject ${markerType} marker: ${error.message}`)
+    return false
+  }
+}
 
 // * Attempt to fuse both sensor session.csv files into unified output.
 // * Called after a sensor finishes combine/cleanup to prevent missing dual-sensor fusion.
@@ -291,8 +327,9 @@ export async function startMirrorSession(
   missionName: string,
   cadenceSec: number,
   fullBandwidth: boolean,
-  unifiedSessionTimestamp?: string
-): Promise<{ success: boolean; error?: string }> {
+  unifiedSessionTimestamp?: string,
+  syncId?: string
+): Promise<{ success: boolean; error?: string; data?: { sessionRoot: string }; syncId?: string }> {
   try {
     console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, vehicle=${vehicleAddress}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`)
 
@@ -319,6 +356,8 @@ export async function startMirrorSession(
     }
 
     console.log(`[QSensor Mirror] Storage path resolved: customPath=${customStoragePath || 'none'}, basePath=${basePath}, rootPath=${rootPath}`)
+
+    const sessionSyncId = syncId || uuidv4()
 
     // * Create directory
     await fs.mkdir(rootPath, { recursive: true })
@@ -352,10 +391,14 @@ export async function startMirrorSession(
       lastSync: null,
       intervalId: null,
       running: true,
+      syncId: sessionSyncId,
     }
 
     activeSessions.set(sessionId, session)
     console.log(`[QSensor Mirror] Session ${sessionId} added to active sessions map`)
+
+    // Inject START sync marker into Pi recording
+    await injectPiSyncMarker(session, sessionSyncId, 'START')
 
     // NOTE: Log the URL that will be polled
     const snapshotsUrl = `http://${session.vehicleAddress}:9150/record/snapshots?session_id=${session.sessionId}`
@@ -382,6 +425,7 @@ export async function startMirrorSession(
       data: {
         sessionRoot: unifiedRoot ?? path.join(basePath, missionName, sessionId),
       },
+      syncId: sessionSyncId,
     }
   } catch (error: any) {
     console.error(`[QSensor Mirror] Start failed:`, error)
@@ -597,6 +641,13 @@ export async function stopMirrorSession(
     }
     console.log(`[QSensor Mirror] Polling stopped for session ${sessionId}`)
 
+    // Inject STOP sync marker before finalizing recording on Pi
+    if (session.syncId) {
+      await injectPiSyncMarker(session, session.syncId, 'STOP')
+    } else {
+      console.warn(`[QSensor Mirror] No syncId available to inject STOP marker for session ${sessionId}`)
+    }
+
     // ! Wait briefly for backend /record/stop to finalize the last chunk (flush, checksum, manifest)
     console.log(`[QSensor Mirror] Waiting 1s for backend to finalize last chunk...`)
     await new Promise(resolve => setTimeout(resolve, 1000))
@@ -700,13 +751,13 @@ export function getSessionStats(
 export function setupQSensorMirrorService(): void {
   ipcMain.handle(
     'qsensor:start-mirror',
-    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?) => {
+    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?, syncId?) => {
       console.log(
         `[QSensor Mirror] IPC start request: session=${sessionId}, vehicle=${vehicleAddress}, cadence=${
           fullBandwidth ? 2 : cadenceSec
-        }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}`
+        }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}, syncId=${syncId ?? 'auto'}`
       )
-      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp)
+      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId)
     }
   )
 

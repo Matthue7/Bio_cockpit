@@ -91,8 +91,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   qsensorStopRecording: (baseUrl: string, sessionId: string) =>
     ipcRenderer.invoke('qsensor:stop-recording', baseUrl, sessionId),
   // Q-Sensor mirroring
-  startQSensorMirror: (sessionId: string, vehicleAddress: string, missionName: string, cadenceSec: number, fullBandwidth: boolean, unifiedSessionTimestamp?: string) =>
-    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp),
+  startQSensorMirror: (
+    sessionId: string,
+    vehicleAddress: string,
+    missionName: string,
+    cadenceSec: number,
+    fullBandwidth: boolean,
+    unifiedSessionTimestamp?: string,
+    syncId?: string
+  ) =>
+    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
   // Q-Sensor storage path
@@ -136,6 +144,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     rateHz?: number
     storagePath?: string
     unifiedSessionTimestamp?: string
+    syncId?: string
   }) => ipcRenderer.invoke('qsensor-serial:start-recording', params),
   qsensorSerialStopRecording: () => ipcRenderer.invoke('qsensor-serial:stop-recording'),
   qsensorSerialGetStats: () => ipcRenderer.invoke('qsensor-serial:get-stats'),

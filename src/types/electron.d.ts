@@ -54,8 +54,9 @@ declare global {
         missionName: string,
         cadenceSec: number,
         fullBandwidth: boolean,
-        unifiedSessionTimestamp?: string
-      ) => Promise<{ success: boolean; data?: { sessionRoot?: string }; error?: string }>
+        unifiedSessionTimestamp?: string,
+        syncId?: string
+      ) => Promise<{ success: boolean; data?: { sessionRoot?: string }; error?: string; syncId?: string }>
 
       stopQSensorMirror: (
         sessionId: string
@@ -94,6 +95,7 @@ declare global {
         rateHz?: number
         storagePath?: string
         unifiedSessionTimestamp?: string
+        syncId?: string
       }) => Promise<{ success: boolean; data?: any; error?: string }>
 
       qsensorSerialStopRecording: () => Promise<{ success: boolean; data?: any; error?: string }>

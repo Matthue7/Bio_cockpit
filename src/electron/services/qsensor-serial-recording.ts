@@ -25,6 +25,9 @@ console.log('[QSensor Serial Recording] Imported QSeriesReading')
 import store from './config-store'
 console.log('[QSensor Serial Recording] Imported config-store')
 
+import { v4 as uuidv4 } from 'uuid'
+console.log('[QSensor Serial Recording] Imported uuidv4')
+
 console.log('[QSensor Serial Recording] All imports completed successfully')
 
 let SerialPort: any
@@ -39,6 +42,7 @@ const localRecorder = new QSeriesLocalRecorder()
 
 // Active recording session state
 let activeSessionId: string | null = null
+let activeSyncId: string | null = null
 let readingListenerAttached = false
 
 // Cache for final session stats (preserved after recording stops)
@@ -242,6 +246,7 @@ async function startRecording(params: {
   rateHz?: number
   storagePath?: string
   unifiedSessionTimestamp?: string
+  syncId?: string
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     ensureConnected()
@@ -255,16 +260,20 @@ async function startRecording(params: {
     // Set storage path in recorder
     localRecorder.setDefaultStoragePath(storagePath)
 
-    // Start recording session
+    // Start recording session with coordinated syncId
+    const syncId = params.syncId ?? uuidv4()
+
     const sessionInfo = await localRecorder.startSession({
       sensorId,
       mission: params.mission,
       rollIntervalS,
       storagePath,
       unifiedSessionTimestamp: params.unifiedSessionTimestamp,
+      syncId,
     })
 
     activeSessionId = sessionInfo.session_id
+    activeSyncId = sessionInfo.syncId
 
     // Attach reading listener if not already attached
     if (!readingListenerAttached) {
@@ -298,6 +307,7 @@ async function startRecording(params: {
         sensor_id: sensorId,
         mission: params.mission,
         storage_path: storagePath,
+        sync_id: sessionInfo.syncId,
       },
     }
   } catch (error: any) {
@@ -314,12 +324,15 @@ async function stopRecording(): Promise<{ success: boolean; data?: any; error?: 
     ensureRecording()
 
     const sessionId = activeSessionId!
+    const syncId = activeSyncId
 
     // Get final stats before stopping (for cache)
     const finalStats = await localRecorder.getStats(sessionId)
 
     // Stop recording session (finalizes chunks, creates session.csv)
     await localRecorder.stopSession(sessionId)
+    activeSyncId = null
+    activeSyncId = null
 
     // Stop acquisition - return sensor to CONFIG_MENU state
     await serialController.stop()
@@ -344,6 +357,7 @@ async function stopRecording(): Promise<{ success: boolean; data?: any; error?: 
         stopped_at: stoppedAt,
         total_rows: lastSessionStats.totalRows,
         bytes_flushed: lastSessionStats.bytesFlushed,
+        sync_id: syncId,
       },
     }
   } catch (error: any) {

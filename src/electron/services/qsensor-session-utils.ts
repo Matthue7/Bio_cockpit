@@ -63,8 +63,8 @@ export interface SyncMetadata {
     uncertaintyMs: number | null
     measuredAt: string | null
     error: string | null
-    markers?: SyncMarker[]          // Detected sync markers
-    driftModel?: DriftModel         // Computed drift correction model
+    markers: SyncMarker[]           // Detected sync markers
+    driftModel: DriftModel | null   // Computed drift correction model
   }
   fusion?: FusionStatus
 }
@@ -124,6 +124,8 @@ export async function ensureSyncMetadata(
         uncertaintyMs: null,
         measuredAt: null,
         error: null,
+        markers: [],
+        driftModel: null,
       },
     }
     await writeSyncMetadataFile(sessionRoot, metadata)
@@ -200,11 +202,14 @@ export function setupSyncMetadataIPC(): void {
       try {
         await updateSyncMetadata(sessionRoot, (metadata) => {
           metadata.timeSync = {
+            ...metadata.timeSync,
             method: timeSync.method,
             offsetMs: timeSync.offsetMs,
             uncertaintyMs: timeSync.uncertaintyMs,
             measuredAt: timeSync.measuredAt,
             error: timeSync.error ?? null,
+            markers: metadata.timeSync.markers || [],
+            driftModel: metadata.timeSync.driftModel ?? null,
           }
         })
         return { success: true }

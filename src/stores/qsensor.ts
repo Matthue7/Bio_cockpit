@@ -7,6 +7,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { v4 as uuidv4 } from 'uuid'
 
 import { QSensorClient } from '@/libs/qsensor-client'
 import { createInitialSensorState, isSensorArmed, isSensorRecording, resetSensorState } from '@/stores/qsensor-common'
@@ -547,6 +548,10 @@ export const useQSensorStore = defineStore('qsensor', () => {
        * Unified session timestamp for shared directory structure
        */
       unifiedSessionTimestamp?: string
+      /**
+       * Shared sync marker identifier for dual-sensor alignment
+       */
+      syncId?: string
     }
   ): Promise<{
     /**
@@ -593,6 +598,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
           return { success: false, error: 'No API base URL configured' }
         }
 
+        // Prefer shared syncId from surface session or provided explicitly
+        const syncId = params.syncId || surfaceSensor.value.currentSession?.syncId
+
         // First, start acquisition on Pi side
         const acqResult = await window.electronAPI.qsensorStartAcquisition(sensor.apiBaseUrl, params.rateHz)
         if (!acqResult.success) {
@@ -618,7 +626,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
           params.mission,
           cadenceSec.value,
           fullBandwidth.value,
-          params.unifiedSessionTimestamp
+          params.unifiedSessionTimestamp,
+          syncId
         )
 
         result = mirrorResult
@@ -635,6 +644,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             rateHz: params.rateHz || 500,
             rollIntervalS: params.rollIntervalS || 60,
             schemaVersion: params.schemaVersion || 1,
+            syncId: syncId || (mirrorResult as any).syncId,
           }
           sensor.recordingState = 'recording'
           sensor.lastError = null
@@ -649,6 +659,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
           rollIntervalS: params.rollIntervalS || 60,
           storagePath,
           unifiedSessionTimestamp: params.unifiedSessionTimestamp,
+          syncId: params.syncId,
         })
 
         if (result.success && result.data) {
@@ -659,6 +670,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             rateHz: params.rateHz || 1.0,
             rollIntervalS: params.rollIntervalS || 60,
             schemaVersion: 1,
+            syncId: params.syncId || result.data.sync_id,
           }
           sensor.recordingState = 'recording'
           sensor.lastError = null
@@ -833,6 +845,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
     // Format: ISO timestamp without colons for filesystem compatibility
     const now = new Date()
     const unifiedSessionTimestamp = now.toISOString().replace(/[:.]/g, '-')
+    const syncId = uuidv4()
 
     let inWaterStarted = false
     let success = false
@@ -843,6 +856,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         rateHz: params.rateHz || 500,
         rollIntervalS: params.rollIntervalS || 60,
         unifiedSessionTimestamp,
+        syncId,
       })
 
       if (!inWaterResult.success) {
@@ -854,6 +868,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
           rateHz: params.rateHz || 500, // Use same rate for synchronized sampling
           rollIntervalS: params.rollIntervalS || 60,
           unifiedSessionTimestamp,
+          syncId,
         })
 
         if (!surfaceResult.success) {
