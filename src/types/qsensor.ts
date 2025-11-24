@@ -107,6 +107,16 @@ export interface QSensorSessionInfo {
    *
    */
   totalChunks?: number
+  /**
+   * Connection mode used for this session (Phase 1).
+   * Captures user's selection at recording start.
+   */
+  connectionMode?: 'api' | 'serial'
+  /**
+   * Backend type used for this session (Phase 1).
+   * For backward compatibility and historical tracking.
+   */
+  backendType?: 'http' | 'serial'
 }
 
 /**
@@ -123,9 +133,21 @@ export interface QSensorState {
    */
   sensorId: QSensorId
   /**
-   *
+   * Backend connection type. Null until connection mode is selected.
    */
-  backendType: QSensorBackendType
+  backendType: QSensorBackendType | null
+
+  // Connection mode selection (Phase 1)
+  /**
+   * User-selected connection mode. Null until explicitly chosen.
+   * 'api' maps to backendType: 'http', 'serial' maps to backendType: 'serial'
+   */
+  connectionMode: 'api' | 'serial' | null
+  /**
+   * Flag indicating the connection mode has been explicitly selected by the user.
+   * Used to distinguish between "not yet chosen" and "reset to null".
+   */
+  connectionModeExplicitlySet: boolean
 
   // Connection config
   /**

@@ -46,13 +46,19 @@ const props = defineProps<{
   sensor: QSensorState
 }>()
 
-// * Backend type badge
+// * Backend type badge (Phase 2: Now shows connection mode)
 const backendLabel = computed(() => {
-  return props.sensor.backendType === 'http' ? 'HTTP (Pi)' : 'Serial (Topside)'
+  if (!props.sensor.connectionMode) {
+    return 'Not Selected'
+  }
+  return props.sensor.connectionMode === 'api' ? 'API (Pi)' : 'Serial (Topside)'
 })
 
 const backendBadgeClass = computed(() => {
-  return props.sensor.backendType === 'http' ? 'bg-blue-600/30 text-blue-400' : 'bg-purple-600/30 text-purple-400'
+  if (!props.sensor.connectionMode) {
+    return 'bg-gray-600/30 text-gray-400'
+  }
+  return props.sensor.connectionMode === 'api' ? 'bg-blue-600/30 text-blue-400' : 'bg-purple-600/30 text-purple-400'
 })
 
 // * Status indicator styling

@@ -30,7 +30,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
   // NOTE: Currently only 'inWater' sensor is used; 'surface' is placeholder for Phase 2+
   const sensors = ref<Map<QSensorId, QSensorState>>(new Map())
 
-  // Initialize in-water sensor (Pi HTTP backend) - ACTIVE
+  // Phase 1: Initialize sensors with backend types
+  // In-water sensor pre-configured for HTTP/API (backward compatible)
   sensors.value.set(
     'inWater',
     createInitialSensorState('inWater', 'http', {
@@ -38,11 +39,11 @@ export const useQSensorStore = defineStore('qsensor', () => {
     })
   )
 
-  // Initialize surface sensor (topside serial backend) - ACTIVE (Phase 4)
+  // Initialize surface sensor (user will choose API or Serial)
   // NOTE: serialPort is null until user selects a port via refreshSurfaceSerialPorts/selectSurfaceSerialPort
   sensors.value.set(
     'surface',
-    createInitialSensorState('surface', 'serial', {
+    createInitialSensorState('surface', null, {
       serialPort: null,
       baudRate: 9600,
     })
@@ -350,6 +351,47 @@ export const useQSensorStore = defineStore('qsensor', () => {
   }
 
   /**
+   * Set connection mode for a sensor.
+   * Phase 1: User-selectable connection mode (API vs Serial).
+   * Updates backend type dynamically based on connection mode.
+   * @param sensorId - Sensor identifier
+   * @param connectionMode - Connection mode ('api' or 'serial')
+   */
+  function setConnectionMode(sensorId: QSensorId, connectionMode: 'api' | 'serial'): void {
+    const sensor = sensors.value.get(sensorId)
+    if (!sensor) {
+      console.error(`[QSensor Store] Unknown sensor: ${sensorId}`)
+      return
+    }
+
+    // Map connection mode to backend type
+    const backendType = connectionMode === 'api' ? 'http' : 'serial'
+
+    // Update sensor state
+    sensor.backendType = backendType
+    sensor.connectionMode = connectionMode
+    sensor.connectionModeExplicitlySet = true
+
+    console.log(`[QSensor Store] Set ${sensorId} connection mode: ${connectionMode} (backend: ${backendType})`)
+  }
+
+  /**
+   * Reset connection mode for a sensor.
+   * Phase 1: Clears connection mode selection.
+   * @param sensorId - Sensor identifier
+   */
+  function resetConnectionMode(sensorId: QSensorId): void {
+    const sensor = sensors.value.get(sensorId)
+    if (!sensor) return
+
+    sensor.backendType = null
+    sensor.connectionMode = null
+    sensor.connectionModeExplicitlySet = false
+
+    console.log(`[QSensor Store] Reset connection mode for ${sensorId}`)
+  }
+
+  /**
    * Connect to a sensor (HTTP or Serial backend routing).
    * Phase 4: Implements backend-specific connection logic.
    * @param sensorId - 'inWater' or 'surface'
@@ -368,6 +410,19 @@ export const useQSensorStore = defineStore('qsensor', () => {
     if (!sensor) {
       return { success: false, error: `Unknown sensor: ${sensorId}` }
     }
+
+    // Phase 1: Validate connection mode is selected
+    if (!sensor.connectionMode || !sensor.connectionModeExplicitlySet) {
+      return { success: false, error: 'Connection mode must be selected before connecting' }
+    }
+
+    // Phase 1: Validate backend type is set (should be set by setConnectionMode)
+    if (sensor.backendType === null) {
+      return { success: false, error: 'Backend type not set (connection mode error)' }
+    }
+
+    // Phase 3: Log connection attempt
+    console.log(`[QSensor Store] Connecting ${sensorId} via ${sensor.connectionMode} (backend: ${sensor.backendType})`)
 
     try {
       let result: {
@@ -390,6 +445,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
         if (!sensor.apiBaseUrl) {
           return { success: false, error: 'No API base URL configured' }
         }
+
+        // Phase 3: Log API URL being used
+        console.log(`[QSensor Store] Connecting via HTTP: apiBaseUrl="${sensor.apiBaseUrl}", port="/dev/ttyUSB0", baud=9600`)
 
         // Connect via HTTP backend (this establishes serial connection on Pi side)
         result = await window.electronAPI.qsensorConnect(sensor.apiBaseUrl, '/dev/ttyUSB0', 9600)
@@ -568,6 +626,16 @@ export const useQSensorStore = defineStore('qsensor', () => {
       return { success: false, error: `Unknown sensor: ${sensorId}` }
     }
 
+    // Phase 1: Validate connection mode is selected
+    if (!sensor.connectionMode || !sensor.connectionModeExplicitlySet) {
+      return { success: false, error: `Connection mode must be selected before recording ${sensorId}` }
+    }
+
+    // Phase 1: Validate backend type is set
+    if (sensor.backendType === null) {
+      return { success: false, error: `Backend type not set for ${sensorId}` }
+    }
+
     if (!sensor.isConnected) {
       return { success: false, error: `Sensor ${sensorId} not connected` }
     }
@@ -575,6 +643,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
     if (isSensorRecording(sensor)) {
       return { success: false, error: `Sensor ${sensorId} already recording` }
     }
+
+    // Phase 3: Log recording start attempt
+    console.log(`[QSensor Store] Starting recording for ${sensorId} via ${sensor.connectionMode} (backend: ${sensor.backendType})`)
 
     try {
       let result: {
@@ -645,6 +716,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
             rollIntervalS: params.rollIntervalS || 60,
             schemaVersion: params.schemaVersion || 1,
             syncId: syncId || (mirrorResult as any).syncId,
+            // Phase 3: Store connection mode and backend type in session
+            connectionMode: sensor.connectionMode || undefined,
+            backendType: sensor.backendType || undefined,
           }
           sensor.recordingState = 'recording'
           sensor.lastError = null
@@ -671,6 +745,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
             rollIntervalS: params.rollIntervalS || 60,
             schemaVersion: 1,
             syncId: params.syncId || result.data.sync_id,
+            // Phase 3: Store connection mode and backend type in session
+            connectionMode: sensor.connectionMode || undefined,
+            backendType: sensor.backendType || undefined,
           }
           sensor.recordingState = 'recording'
           sensor.lastError = null
@@ -840,6 +917,27 @@ export const useQSensorStore = defineStore('qsensor', () => {
   }> {
     const errors: string[] = []
     clearUnifiedSessionState()
+
+    // Phase 1: Validate both sensors have connection modes selected
+    const inWater = sensors.value.get('inWater')
+    const surface = sensors.value.get('surface')
+
+    if (!inWater?.connectionMode || !inWater?.connectionModeExplicitlySet) {
+      errors.push('In-water sensor: Connection mode must be selected')
+    }
+
+    if (!surface?.connectionMode || !surface?.connectionModeExplicitlySet) {
+      errors.push('Surface sensor: Connection mode must be selected')
+    }
+
+    if (errors.length > 0) {
+      return { success: false, errors }
+    }
+
+    // Phase 3: Log dual-sensor start with connection modes
+    console.log(
+      `[QSensor Store] Starting both sensors - InWater: ${inWater?.connectionMode}, Surface: ${surface?.connectionMode}`
+    )
 
     // Generate unified session timestamp for shared directory structure
     // Format: ISO timestamp without colons for filesystem compatibility
@@ -1095,6 +1193,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
     // Multi-sensor API (Phase 4+)
     sensors, // Expose for advanced usage
     getSensor,
+    setConnectionMode, // Phase 1: Connection mode management
+    resetConnectionMode, // Phase 1: Connection mode management
     connectSensor,
     disconnectSensor,
     startRecordingSensor,

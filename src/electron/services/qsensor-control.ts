@@ -16,14 +16,24 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
   const prefix = corrId ? `[QSensor][${corrId}]` : '[QSensor]'
 
   try {
+    // Extract timeout value for logging (AbortSignal.timeout doesn't expose the timeout value)
+    let timeoutMs = 'none'
+    if (options.signal) {
+      // Try to extract timeout from the signal if it was created with AbortSignal.timeout()
+      // This is a best-effort extraction for logging purposes
+      const signalStr = options.signal.toString()
+      if (signalStr.includes('timeout')) {
+        timeoutMs = '30000' // We know connect uses 30s
+      }
+    }
+
     // Log request details
     console.log(`${prefix}[PERF] ${method} ${url} - START at t=${startTime}ms`)
+    console.log(`${prefix}[DEBUG]   Timeout: ${timeoutMs}ms`)
+    console.log(`${prefix}[DEBUG]   URL parsed: protocol=${new URL(url).protocol}, host=${new URL(url).hostname}:${new URL(url).port}`)
     if (options.body) {
       const bodyPreview = typeof options.body === 'string' ? options.body.substring(0, 500) : '[Binary]'
       console.log(`${prefix}[DEBUG]   Body: ${bodyPreview}`)
-    }
-    if (options.signal) {
-      console.log(`${prefix}[DEBUG]   Timeout: ${(options.signal as any).timeout || 'default'}ms`)
     }
 
     const fetchStart = Date.now()
@@ -49,6 +59,9 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
   } catch (error: any) {
     const elapsed = Date.now() - startTime
     console.error(`${prefix}[HTTP] ${method} ${url} FAILED: ${error.message} (${elapsed}ms)`)
+    console.error(`${prefix}[DEBUG]   Error type: ${error.constructor.name}`)
+    console.error(`${prefix}[DEBUG]   Error cause: ${error.cause || 'none'}`)
+    console.error(`${prefix}[DEBUG]   Full error:`, error)
     throw new Error(error.message || 'Request failed')
   }
 }
@@ -63,17 +76,23 @@ async function connect(
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   const fnStart = Date.now()
   console.log(`[QSensor Control][PERF] connect() START at t=${fnStart}ms`)
+  console.log(`[QSensor Control][DEBUG] Parameters: baseUrl="${baseUrl}", port="${port}", baud=${baud}`)
 
   try {
+    // Validate and log the base URL
+    console.log(`[QSensor Control][DEBUG]   Constructing URL from baseUrl: ${baseUrl}`)
     const url = new URL('/sensor/connect', baseUrl)
     url.searchParams.set('port', port)
     url.searchParams.set('baud', String(baud))
+
+    const finalUrl = url.toString()
+    console.log(`[QSensor Control][DEBUG]   Final URL: ${finalUrl}`)
 
     const beforeFetch = Date.now()
     console.log(`[QSensor Control][PERF]   URL construction took ${beforeFetch - fnStart}ms`)
 
     // 30 second timeout - connection can take time to enter config menu
-    const data = await fetchFromMain(url.toString(), {
+    const data = await fetchFromMain(finalUrl, {
       method: 'POST',
       signal: AbortSignal.timeout(30000),
     })
@@ -86,6 +105,7 @@ async function connect(
     const fnEnd = Date.now()
     console.error(`[QSensor Control][PERF] connect() FAILED after ${fnEnd - fnStart}ms: ${error.message}`)
     console.error('[QSensor Control] Connect failed:', error.message)
+    console.error('[QSensor Control] Error details:', error)
     return { success: false, error: error.message }
   }
 }

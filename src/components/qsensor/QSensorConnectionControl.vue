@@ -7,8 +7,16 @@
 -->
 <template>
   <div class="flex flex-col gap-4">
+    <!-- Phase 2: Connection mode selector -->
+    <QSensorConnectionModeSelector
+      :sensor-id="sensorId"
+      :sensor="sensor"
+      @mode-selected="handleModeSelected"
+      @error="emit('error', $event)"
+    />
+
     <!-- HTTP backend fields -->
-    <template v-if="sensor.backendType === 'http'">
+    <template v-if="sensor.connectionMode === 'api'">
       <div class="flex items-center gap-4">
         <label class="text-sm font-medium min-w-[100px]">API URL:</label>
         <input
@@ -16,19 +24,19 @@
           type="text"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
           placeholder="http://blueos.local:9150"
-          :disabled="sensor.isConnected || isConnecting"
+          :disabled="sensor.isConnected || isConnecting || !sensor.connectionMode"
         />
       </div>
     </template>
 
     <!-- Serial backend fields -->
-    <template v-else-if="sensor.backendType === 'serial'">
+    <template v-else-if="sensor.connectionMode === 'serial'">
       <div class="flex items-center gap-4">
         <label class="text-sm font-medium min-w-[100px]">Serial Port:</label>
         <select
           v-model="selectedSurfacePort"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
-          :disabled="sensor.isConnected || isConnecting || isRefreshingPorts"
+          :disabled="sensor.isConnected || isConnecting || isRefreshingPorts || !sensor.connectionMode"
         >
           <option v-if="availableSurfacePorts.length === 0" value="">No serial ports detected</option>
           <option
@@ -42,7 +50,7 @@
         <button
           type="button"
           class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm disabled:opacity-50"
-          :disabled="sensor.isConnected || isConnecting || isRefreshingPorts"
+          :disabled="sensor.isConnected || isConnecting || isRefreshingPorts || !sensor.connectionMode"
           @click="handleRefreshPorts"
         >
           {{ isRefreshingPorts ? 'Refreshing…' : 'Refresh' }}
@@ -56,7 +64,7 @@
           type="number"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
           placeholder="9600"
-          :disabled="sensor.isConnected || isConnecting"
+          :disabled="sensor.isConnected || isConnecting || !sensor.connectionMode"
         />
       </div>
     </template>
@@ -66,7 +74,7 @@
       <button
         v-if="!sensor.isConnected"
         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm disabled:opacity-50"
-        :disabled="isConnecting"
+        :disabled="isConnecting || !sensor.connectionMode || !sensor.connectionModeExplicitlySet"
         @click="handleConnect"
       >
         {{ isConnecting ? 'Connecting...' : 'Connect' }}
@@ -79,6 +87,13 @@
       >
         {{ isDisconnecting ? 'Disconnecting...' : 'Disconnect' }}
       </button>
+
+      <!-- Connection mode indicator -->
+      <div v-if="sensor.connectionMode" class="ml-auto flex items-center gap-2">
+        <span class="text-xs px-2 py-1 rounded" :class="modeBadgeClass">
+          {{ modeLabel }}
+        </span>
+      </div>
     </div>
 
     <!-- Error display -->
@@ -94,6 +109,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useQSensorStore } from '@/stores/qsensor'
 import type { SerialPortInfo } from '@/stores/qsensor'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
+import QSensorConnectionModeSelector from './QSensorConnectionModeSelector.vue'
 
 const props = defineProps<{
   // * Sensor identifier this control manages
@@ -125,6 +141,25 @@ const selectedSurfacePort = computed<string | null>({
   set: (value) => store.selectSurfaceSerialPort(value || null),
 })
 
+// Phase 2: Mode badge styling
+const modeLabel = computed(() => {
+  if (!props.sensor.connectionMode) return ''
+  return props.sensor.connectionMode === 'api' ? 'API' : 'Serial'
+})
+
+const modeBadgeClass = computed(() => {
+  if (!props.sensor.connectionMode) return ''
+  return props.sensor.connectionMode === 'api'
+    ? 'bg-blue-600/30 text-blue-400'
+    : 'bg-purple-600/30 text-purple-400'
+})
+
+// Phase 2: Handle connection mode selection
+function handleModeSelected(mode: 'api' | 'serial') {
+  console.log(`[QSensorConnectionControl] Connection mode selected: ${mode}`)
+  // Store will handle backend type updates
+}
+
 // * Format dropdown label for a port
 function formatPortLabel(port: SerialPortInfo): string {
   const details = [port.manufacturer, port.serialNumber].filter(Boolean).join(' • ')
@@ -133,7 +168,7 @@ function formatPortLabel(port: SerialPortInfo): string {
 
 // * Refresh available serial ports for surface sensor
 async function handleRefreshPorts(): Promise<void> {
-  if (props.sensor.backendType !== 'serial') return
+  if (props.sensor.connectionMode !== 'serial') return
   isRefreshingPorts.value = true
   const result = await store.refreshSurfaceSerialPorts()
   isRefreshingPorts.value = false
@@ -143,13 +178,13 @@ async function handleRefreshPorts(): Promise<void> {
 }
 
 onMounted(() => {
-  if (props.sensor.backendType === 'serial') {
+  if (props.sensor.connectionMode === 'serial') {
     handleRefreshPorts()
   }
 })
 
 watch(
-  () => props.sensor.backendType,
+  () => props.sensor.connectionMode,
   (newVal) => {
     if (newVal === 'serial') {
       handleRefreshPorts()
@@ -180,9 +215,9 @@ async function handleConnect(): Promise<void> {
     // * Update sensor configuration in store before connecting
     const sensorState = store.getSensor(props.sensorId)
     if (sensorState) {
-      if (props.sensor.backendType === 'http') {
+      if (props.sensor.connectionMode === 'api') {
         sensorState.apiBaseUrl = localApiBaseUrl.value
-      } else if (props.sensor.backendType === 'serial') {
+      } else if (props.sensor.connectionMode === 'serial') {
         store.selectSurfaceSerialPort(selectedSurfacePort.value || null)
         sensorState.baudRate = localBaudRate.value
       }

@@ -7,8 +7,17 @@
 -->
 <template>
   <div class="flex flex-col gap-4">
+    <!-- Phase 2: Connection mode warning -->
+    <div
+      v-if="!sensor.connectionMode"
+      class="p-3 bg-yellow-900/30 border border-yellow-600 rounded text-sm text-yellow-400"
+    >
+      <span class="font-medium">Connection Mode Required</span>
+      <p class="mt-1">Select a connection type before recording</p>
+    </div>
+
     <!-- Recording parameters -->
-    <div v-if="!isRecording && sensor.isConnected" class="flex flex-col gap-3">
+    <div v-if="!isRecording && sensor.isConnected && sensor.connectionMode" class="flex flex-col gap-3">
       <div class="flex items-center gap-4">
         <label class="text-sm font-medium min-w-[100px]">Rate (Hz):</label>
         <input
@@ -18,7 +27,7 @@
           min="0.1"
           max="500"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
-          :disabled="isRecording"
+          :disabled="isRecording || !sensor.connectionMode"
         />
         <span class="text-xs text-gray-400">(0.1-500)</span>
       </div>
@@ -31,7 +40,7 @@
           min="1"
           max="300"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
-          :disabled="isRecording"
+          :disabled="isRecording || !sensor.connectionMode"
         />
         <span class="text-xs text-gray-400">seconds</span>
       </div>
@@ -42,7 +51,7 @@
       <button
         v-if="!isRecording"
         class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm disabled:opacity-50"
-        :disabled="!sensor.isConnected || isStarting"
+        :disabled="!sensor.isConnected || !sensor.connectionMode || !sensor.connectionModeExplicitlySet || isStarting"
         @click="handleStart"
       >
         {{ isStarting ? 'Starting...' : 'Start Recording' }}
@@ -72,6 +81,10 @@
           <span class="font-medium">Roll:</span>
           <span class="ml-2">{{ sensor.currentSession.rollIntervalS }}s</span>
         </div>
+      </div>
+      <div v-if="sensor.currentSession.connectionMode">
+        <span class="font-medium">Connection:</span>
+        <span class="ml-2">{{ sensor.currentSession.connectionMode || 'Unknown' }}</span>
       </div>
       <div v-if="sensor.lastSync">
         <span class="font-medium">Last Sync:</span>
@@ -118,6 +131,12 @@ const isRecording = computed(() => isSensorRecording(props.sensor))
 
 // * Start recording request handler
 async function handleStart() {
+  // Phase 2: Validate connection mode
+  if (!props.sensor.connectionMode) {
+    emit('error', 'Connection mode must be selected before recording')
+    return
+  }
+
   isStarting.value = true
 
   try {
