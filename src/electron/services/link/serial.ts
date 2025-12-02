@@ -68,7 +68,7 @@ export class SerialLink extends Link {
       port.open((error: Error | null) => {
         if (error) {
           console.error(`Error opening serial port ${this.path}:`, error)
-          reject()
+          reject(error)
           return
         }
 
