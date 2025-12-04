@@ -1,20 +1,25 @@
 /**
  * Shared Q-Sensor type definitions for dual-sensor architecture.
  *
- * Phase 1: Type scaffolding for both in-water (Pi HTTP) and surface (topside serial) sensors.
+ * Phase 1: Both sensors support HTTP (dual-API) and Serial modes.
+ * Either sensor can connect to a Q_Sensor_API instance via HTTP or direct serial.
  */
 
 /**
  * Sensor identity type.
- * - 'inWater': Pi-based in-water sensor controlled via Q_Sensor_API HTTP/JSON
- * - 'surface': Topside surface sensor controlled via direct serial (to be implemented in Phase 2+)
+ * - 'inWater': In-water sensor (can use HTTP to BlueOS Pi or Serial)
+ * - 'surface': Surface reference sensor (can use HTTP to separate Pi or Serial)
+ *
+ * Phase 1: Both sensors support HTTP (dual-API) mode with separate base URLs.
  */
 export type QSensorId = 'inWater' | 'surface'
 
 /**
  * Backend connection type for a sensor.
- * - 'http': Controlled via HTTP REST API (Q_Sensor_API on Pi)
+ * - 'http': Controlled via HTTP REST API (Q_Sensor_API on any Pi)
  * - 'serial': Controlled via direct serial communication (Electron-based, topside)
+ *
+ * Phase 1: Both 'inWater' and 'surface' sensors can use either backend type.
  */
 export type QSensorBackendType = 'http' | 'serial'
 
@@ -151,9 +156,11 @@ export interface QSensorState {
 
   // Connection config
   /**
-   *
+   * API base URL for HTTP backend.
+   * - In-water: Pre-configured (http://blueos.local:9150)
+   * - Surface: User-configured, persisted via config store (Phase 1)
    */
-  apiBaseUrl?: string // For HTTP backend (in-water sensor)
+  apiBaseUrl?: string
   /**
    *
    */

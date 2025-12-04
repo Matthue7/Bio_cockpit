@@ -9,7 +9,7 @@
         @change="handleConnectionModeChange"
       >
         <option value="">Select connection type...</option>
-        <option value="api">API (via Pi/HTTP)</option>
+        <option value="api">API (HTTP/Pi)</option>
         <option value="serial">Serial (direct connection)</option>
       </select>
     </div>

@@ -23,9 +23,18 @@
           v-model="localApiBaseUrl"
           type="text"
           class="flex-1 px-3 py-2 bg-slate-800 text-white border border-slate-600 rounded text-sm"
-          placeholder="http://blueos.local:9150"
+          :placeholder="apiUrlPlaceholder"
           :disabled="sensor.isConnected || isConnecting || !sensor.connectionMode"
+          @blur="handleApiUrlBlur"
         />
+      </div>
+
+      <!-- Helper text for unconfigured surface sensor -->
+      <div
+        v-if="sensorId === 'surface' && !sensor.apiBaseUrl"
+        class="p-2 bg-blue-900/20 border border-blue-600/30 rounded text-xs text-blue-400"
+      >
+        Enter the API URL of your surface reference sensor's Pi (e.g., http://surfaceref.local:9150)
       </div>
     </template>
 
@@ -153,6 +162,23 @@ const modeBadgeClass = computed(() => {
     ? 'bg-blue-600/30 text-blue-400'
     : 'bg-purple-600/30 text-purple-400'
 })
+
+// Phase 1: Dynamic placeholder based on sensor ID
+const apiUrlPlaceholder = computed(() => {
+  return props.sensorId === 'inWater'
+    ? 'http://blueos.local:9150'
+    : 'http://surfaceref.local:9150'
+})
+
+// Phase 1: Auto-save surface URL on blur
+async function handleApiUrlBlur() {
+  if (props.sensorId === 'surface' && props.sensor.connectionMode === 'api') {
+    const result = await store.setSurfaceApiUrl(localApiBaseUrl.value)
+    if (!result.success && result.error) {
+      emit('error', result.error)
+    }
+  }
+}
 
 // Phase 2: Handle connection mode selection
 function handleModeSelected(mode: 'api' | 'serial') {

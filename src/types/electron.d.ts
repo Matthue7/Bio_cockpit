@@ -73,6 +73,18 @@ declare global {
 
       setQSensorStoragePath: (storagePath: string) => Promise<void>
 
+      /**
+       * Get surface sensor API base URL from config store.
+       * Returns empty string if not set (user must configure).
+       */
+      getQSensorSurfaceApiUrl: () => Promise<string>
+
+      /**
+       * Save surface sensor API base URL to config store.
+       * Persists across app restarts.
+       */
+      setQSensorSurfaceApiUrl: (apiUrl: string) => Promise<void>
+
       // Q-Sensor serial recording APIs (topside/surface sensor)
       qsensorSerialConnect: (
         port: string,

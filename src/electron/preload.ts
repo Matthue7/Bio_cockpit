@@ -107,6 +107,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectQSensorStorageDirectory: () => ipcRenderer.invoke('select-qsensor-storage-directory'),
   getQSensorStoragePath: () => ipcRenderer.invoke('get-qsensor-storage-path'),
   setQSensorStoragePath: (storagePath: string) => ipcRenderer.invoke('set-qsensor-storage-path', storagePath),
+  // Q-Sensor surface API URL (Phase 1)
+  getQSensorSurfaceApiUrl: () => ipcRenderer.invoke('get-qsensor-surface-api-url'),
+  setQSensorSurfaceApiUrl: (apiUrl: string) => ipcRenderer.invoke('set-qsensor-surface-api-url', apiUrl),
   // Q-Sensor serial recording (topside/surface sensor)
   qsensorSerialConnect: (port: string, baudRate: number) => {
     console.log(`[Preload] qsensorSerialConnect called - port: ${port}, baudRate: ${baudRate}`)

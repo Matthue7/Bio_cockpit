@@ -336,6 +336,48 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
   }
 
+  /**
+   * Set API base URL for surface sensor (API mode).
+   * Validates and persists to config store.
+   * Phase 1: Manual URL entry with persistence.
+   * @param apiUrl - Full API base URL (e.g., 'http://surfaceref.local:9150')
+   */
+  async function setSurfaceApiUrl(apiUrl: string): Promise<{
+    success: boolean
+    error?: string
+  }> {
+    const surface = sensors.value.get('surface')
+    if (!surface) {
+      return { success: false, error: 'Surface sensor not found' }
+    }
+
+    // Validate URL format
+    if (apiUrl && apiUrl.trim() !== '') {
+      try {
+        const url = new URL(apiUrl)
+        // Ensure it's HTTP/HTTPS
+        if (!url.protocol.startsWith('http')) {
+          return { success: false, error: 'API URL must use http:// or https://' }
+        }
+      } catch (error) {
+        return { success: false, error: 'Invalid URL format' }
+      }
+    }
+
+    // Update surface sensor state
+    surface.apiBaseUrl = apiUrl || undefined
+
+    // Persist to config store
+    try {
+      await window.electronAPI.setQSensorSurfaceApiUrl(apiUrl)
+      console.log(`[QSensor Store] Surface API URL saved: ${apiUrl || '(empty)'}`)
+      return { success: true }
+    } catch (error: any) {
+      surface.lastError = error.message
+      return { success: false, error: error.message }
+    }
+  }
+
   // ========================================
   // MULTI-SENSOR API (Phase 4+)
   // Dual-sensor control with backend routing (HTTP vs Serial)
@@ -373,6 +415,22 @@ export const useQSensorStore = defineStore('qsensor', () => {
     sensor.connectionModeExplicitlySet = true
 
     console.log(`[QSensor Store] Set ${sensorId} connection mode: ${connectionMode} (backend: ${backendType})`)
+
+    // Phase 1: Load persisted surface URL when switching to API mode
+    if (sensorId === 'surface' && connectionMode === 'api') {
+      window.electronAPI.getQSensorSurfaceApiUrl()
+        .then((savedUrl) => {
+          if (savedUrl && sensor) {
+            sensor.apiBaseUrl = savedUrl
+            console.log(`[QSensor Store] Loaded persisted surface URL: ${savedUrl}`)
+          }
+        })
+        .catch((error) => {
+          console.error('[QSensor Store] Failed to load surface URL:', error)
+          console.error('[QSensor Store] Error details:', error?.message || error)
+          // Safely bail - sensor.apiBaseUrl remains undefined, user will need to enter manually
+        })
+    }
   }
 
   /**
@@ -1189,6 +1247,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
     selectedSurfacePortPath,
     refreshSurfaceSerialPorts,
     selectSurfaceSerialPort,
+    setSurfaceApiUrl, // Phase 1: Surface API URL management
 
     // Multi-sensor API (Phase 4+)
     sensors, // Expose for advanced usage

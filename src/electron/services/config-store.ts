@@ -22,6 +22,9 @@ const electronStoreSchema = {
   qsensorStoragePath: {
     type: 'string',
   },
+  qsensorSurfaceApiUrl: {
+    type: 'string',
+  },
 }
 
 /**
@@ -56,6 +59,11 @@ export interface ElectronStoreSchema {
    * Q-Sensor storage base path (for mirrored chunks)
    */
   qsensorStoragePath?: string
+  /**
+   * Surface Q-Sensor API base URL (for API mode).
+   * Persisted across app restarts. Defaults to empty (user must set).
+   */
+  qsensorSurfaceApiUrl?: string
 }
 
 let storeInstance: Store<ElectronStoreSchema> | null = null

@@ -163,6 +163,15 @@ ipcMain.handle('set-qsensor-storage-path', (_event, storagePath: string) => {
   store.set('qsensorStoragePath', storagePath)
 })
 
+// Q-Sensor surface API URL IPC handlers
+ipcMain.handle('get-qsensor-surface-api-url', () => {
+  return store.get('qsensorSurfaceApiUrl') || ''
+})
+
+ipcMain.handle('set-qsensor-surface-api-url', (_event, apiUrl: string) => {
+  store.set('qsensorSurfaceApiUrl', apiUrl)
+})
+
 // NOTE: Generic serial port handlers (serial-list-ports, serial-open, etc.) are NOT implemented here.
 // All Q-Sensor serial functionality is handled through qsensor-serial-recording.ts which has:
 // - qsensor-serial:list-ports
