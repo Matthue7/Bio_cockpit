@@ -21,7 +21,7 @@ import { fuseSessionData, areBothSensorsComplete, isFusionComplete } from './qse
 
 interface MirrorSession {
   sessionId: string
-  vehicleAddress: string
+  apiBaseUrl: string
   missionName: string
   cadenceSec: number
   fullBandwidth: boolean
@@ -38,8 +38,10 @@ interface MirrorSession {
 const activeSessions = new Map<string, MirrorSession>()
 
 // * Inject a sync marker into the Pi recording via /record/sync-marker.
+// TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+// TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
 async function injectPiSyncMarker(session: MirrorSession, syncId: string, markerType: 'START' | 'STOP'): Promise<boolean> {
-  const syncUrl = `http://${session.vehicleAddress}:9150/record/sync-marker`
+  const syncUrl = `${session.apiBaseUrl}/record/sync-marker`
 
   try {
     const response = await fetch(syncUrl, {
@@ -54,6 +56,7 @@ async function injectPiSyncMarker(session: MirrorSession, syncId: string, marker
     })
 
     if (!response.ok) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       console.warn(
         `[QSensor Mirror] Failed to inject ${markerType} marker: HTTP ${response.status} ${response.statusText}`
       )
@@ -66,6 +69,8 @@ async function injectPiSyncMarker(session: MirrorSession, syncId: string, marker
     )
     return true
   } catch (error: any) {
+    // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
+    // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
     console.warn(`[QSensor Mirror] Failed to inject ${markerType} marker: ${error.message}`)
     return false
   }
@@ -201,13 +206,13 @@ async function loadMirrorMetadata(rootPath: string): Promise<{ lastChunkIndex: n
 
 // * Download a single chunk with atomic write and SHA256 verification.
 async function downloadChunk(
-  vehicleAddress: string,
+  apiBaseUrl: string,
   sessionId: string,
   chunkName: string,
   expectedSha256: string,
   targetDir: string
 ): Promise<{ success: boolean; bytes: number; error?: string }> {
-  const url = `http://${vehicleAddress}:9150/files/${sessionId}/${chunkName}`
+  const url = `${apiBaseUrl}/files/${sessionId}/${chunkName}`
   const targetPath = path.join(targetDir, chunkName)
   const tmpPath = path.join(targetDir, `${chunkName}.tmp`)
 
@@ -217,6 +222,7 @@ async function downloadChunk(
     // * Download to temp file before verification
     const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
     if (!response.ok) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       console.error(`[QSensor Mirror] Download failed: HTTP ${response.status} ${response.statusText}`)
       return { success: false, bytes: 0, error: `HTTP ${response.status}` }
     }
@@ -262,13 +268,15 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 
   try {
     // * Get snapshots list
-    const url = `http://${session.vehicleAddress}:9150/record/snapshots?session_id=${session.sessionId}`
+    // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
+    const url = `${session.apiBaseUrl}/record/snapshots?session_id=${session.sessionId}`
     console.log(`[QSensor Mirror] Polling ${url}...`)
 
     // NOTE: Increased timeout from 5s to 15s; Pi can be slow when finalizing chunks
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
 
     if (!response.ok) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       console.warn(`[QSensor Mirror] Snapshots request failed: HTTP ${response.status} ${response.statusText}`)
       return
     }
@@ -291,7 +299,7 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
       console.log(`[QSensor Mirror] Attempting to download chunk ${chunk.index}: ${chunk.name} (${chunk.size_bytes} bytes, sha256=${chunk.sha256?.substring(0, 8)}...)`)
 
       const result = await downloadChunk(
-        session.vehicleAddress,
+        session.apiBaseUrl,
         session.sessionId,
         chunk.name,
         chunk.sha256,
@@ -315,6 +323,8 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
     await writeMirrorMetadata(session)
     console.log(`[QSensor Mirror] Poll complete for session ${session.sessionId}`)
   } catch (error: any) {
+    // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
+    // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
     console.error(`[QSensor Mirror] Poll error for session ${session.sessionId}:`, error.message, error.stack)
   }
 }
@@ -323,7 +333,7 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 // * Uses unified session layout when provided to align in-water data with topside recordings.
 export async function startMirrorSession(
   sessionId: string,
-  vehicleAddress: string,
+  apiBaseUrl: string,
   missionName: string,
   cadenceSec: number,
   fullBandwidth: boolean,
@@ -331,7 +341,9 @@ export async function startMirrorSession(
   syncId?: string
 ): Promise<{ success: boolean; error?: string; data?: { sessionRoot: string }; syncId?: string }> {
   try {
-    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, vehicle=${vehicleAddress}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`)
+    // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+    // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
+    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`)
 
     // NOTE: Prevent duplicate mirrors for the same session
     if (activeSessions.has(sessionId)) {
@@ -380,7 +392,7 @@ export async function startMirrorSession(
 
     const session: MirrorSession = {
       sessionId,
-      vehicleAddress,
+      apiBaseUrl,
       missionName,
       cadenceSec: fullBandwidth ? 2 : cadenceSec, // NOTE: Fast polling in full-bandwidth mode
       fullBandwidth,
@@ -401,7 +413,7 @@ export async function startMirrorSession(
     await injectPiSyncMarker(session, sessionSyncId, 'START')
 
     // NOTE: Log the URL that will be polled
-    const snapshotsUrl = `http://${session.vehicleAddress}:9150/record/snapshots?session_id=${session.sessionId}`
+    const snapshotsUrl = `${session.apiBaseUrl}/record/snapshots?session_id=${session.sessionId}`
     console.log(`[QSensor Mirror] Will poll: ${snapshotsUrl} every ${session.cadenceSec}s`)
 
     // * Start polling - wrap in try-catch to catch any immediate errors
@@ -428,6 +440,7 @@ export async function startMirrorSession(
       syncId: sessionSyncId,
     }
   } catch (error: any) {
+    // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
     console.error(`[QSensor Mirror] Start failed:`, error)
     return { success: false, error: error.message }
   }
@@ -626,6 +639,8 @@ async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{ s
 export async function stopMirrorSession(
   sessionId: string
 ): Promise<{ success: boolean; error?: string }> {
+  // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
+  // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
   const session = activeSessions.get(sessionId)
 
   if (!session) {
@@ -719,6 +734,7 @@ export async function stopMirrorSession(
 
     return { success: true }
   } catch (error: any) {
+    // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
     console.error(`[QSensor Mirror] Stop failed:`, error)
     return { success: false, error: error.message }
   }
@@ -751,13 +767,15 @@ export function getSessionStats(
 export function setupQSensorMirrorService(): void {
   ipcMain.handle(
     'qsensor:start-mirror',
-    async (_event, sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?, syncId?) => {
+    async (_event, sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?, syncId?) => {
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       console.log(
-        `[QSensor Mirror] IPC start request: session=${sessionId}, vehicle=${vehicleAddress}, cadence=${
+        `[QSensor Mirror] IPC start request: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, cadence=${
           fullBandwidth ? 2 : cadenceSec
         }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}, syncId=${syncId ?? 'auto'}`
       )
-      return await startMirrorSession(sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId)
+      return await startMirrorSession(sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId)
     }
   )
 

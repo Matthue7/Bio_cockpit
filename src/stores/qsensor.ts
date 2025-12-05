@@ -181,7 +181,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       const result = await window.electronAPI.startQSensorMirror(
         sensor.currentSession.sessionId,
-        vehicleAddress.value,
+        inWaterSensor.value.apiBaseUrl || 'http://blueos.local:9150',
         sensor.currentSession.mission,
         cadenceSec.value,
         fullBandwidth.value
@@ -352,6 +352,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
 
     // Validate URL format
+    // TODO: Phase 3 - Move URL validation logic to a shared utility function
+    // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
     if (apiUrl && apiUrl.trim() !== '') {
       try {
         const url = new URL(apiUrl)
@@ -464,6 +466,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
      */
     error?: string
   }> {
+    // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
+    // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
     const sensor = sensors.value.get(sensorId)
     if (!sensor) {
       return { success: false, error: `Unknown sensor: ${sensorId}` }
@@ -505,6 +509,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
         }
 
         // Phase 3: Log API URL being used
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+        // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
         console.log(`[QSensor Store] Connecting via HTTP: apiBaseUrl="${sensor.apiBaseUrl}", port="/dev/ttyUSB0", baud=9600`)
 
         // Connect via HTTP backend (this establishes serial connection on Pi side)
@@ -520,6 +526,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             sensor.healthData = healthResult.data
           }
         } else {
+          // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
           sensor.lastError = result.error || 'Connection failed'
         }
       } else if (sensor.backendType === 'serial') {
@@ -553,6 +560,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             sensor.healthData = healthResult.data
           }
         } else {
+          // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
           sensor.lastError = result.error || 'Connection failed'
         }
       } else {
@@ -561,6 +569,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       sensor.lastError = error.message
       return { success: false, error: error.message }
     }
@@ -611,6 +620,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         if (!sensor.apiBaseUrl) {
           return { success: false, error: 'No API base URL configured' }
         }
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         result = await window.electronAPI.qsensorDisconnect(sensor.apiBaseUrl)
       } else if (sensor.backendType === 'serial') {
         result = await window.electronAPI.qsensorSerialDisconnect()
@@ -625,6 +635,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       sensor.lastError = error.message
       return { success: false, error: error.message }
     }
@@ -728,15 +739,19 @@ export const useQSensorStore = defineStore('qsensor', () => {
         }
 
         // Prefer shared syncId from surface session or provided explicitly
+        // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
         const syncId = params.syncId || surfaceSensor.value.currentSession?.syncId
 
         // First, start acquisition on Pi side
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         const acqResult = await window.electronAPI.qsensorStartAcquisition(sensor.apiBaseUrl, params.rateHz)
         if (!acqResult.success) {
+          // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
           return { success: false, error: acqResult.error || 'Failed to start acquisition' }
         }
 
         // Then, start recording on Pi side
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         const recResult = await window.electronAPI.qsensorStartRecording(sensor.apiBaseUrl, {
           mission: params.mission,
           rate_hz: params.rateHz,
@@ -745,13 +760,15 @@ export const useQSensorStore = defineStore('qsensor', () => {
         })
 
         if (!recResult.success) {
+          // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
           return { success: false, error: recResult.error || 'Failed to start recording' }
         }
 
         // Now start mirroring (downloads data from Pi to desktop)
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         const mirrorResult = await window.electronAPI.startQSensorMirror(
           recResult.data.session_id,
-          vehicleAddress.value,
+          sensor.apiBaseUrl || 'http://blueos.local:9150',
           params.mission,
           cadenceSec.value,
           fullBandwidth.value,
@@ -816,6 +833,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       sensor.lastError = error.message
       return { success: false, error: error.message }
     }
@@ -870,13 +888,16 @@ export const useQSensorStore = defineStore('qsensor', () => {
         // Stop mirroring first
         const mirrorResult = await window.electronAPI.stopQSensorMirror(sensor.currentSession.sessionId)
         if (!mirrorResult.success) {
+          // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
           console.warn(`[QSensor Store] Failed to stop mirroring for ${sensorId}:`, mirrorResult.error)
         }
 
         // Then stop recording on Pi
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         result = await window.electronAPI.qsensorStopRecording(sensor.apiBaseUrl, sensor.currentSession.sessionId)
 
         // Stop acquisition
+        // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
         await window.electronAPI.qsensorStopAcquisition(sensor.apiBaseUrl)
       } else if (sensor.backendType === 'serial') {
         // Surface sensor: stop local recording
@@ -896,11 +917,13 @@ export const useQSensorStore = defineStore('qsensor', () => {
         // Clear currentSession after successful stop
         sensor.currentSession = null
       } else {
+        // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
         sensor.lastError = result.error || 'Stop recording failed'
       }
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       sensor.lastError = error.message
       return { success: false, error: error.message }
     }
@@ -919,6 +942,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
       if (sensor.backendType === 'http') {
         // In-water sensor: get mirroring stats (requires active session)
         if (!sensor.currentSession) return
+        // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
         const result = await window.electronAPI.getQSensorStats(sensor.currentSession.sessionId)
         if (result.success && result.stats) {
           sensor.bytesMirrored = result.stats.bytesMirrored || 0
@@ -938,6 +962,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         }
       }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       console.warn(`[QSensor Store] Failed to refresh stats for ${sensorId}:`, error)
     }
   }
@@ -973,6 +998,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
      */
     errors: string[]
   }> {
+    // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
+    // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
     const errors: string[] = []
     clearUnifiedSessionState()
 
@@ -1040,6 +1067,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
           console.log(`[QSensor Store] Started both sensors for mission: ${params.mission}`)
 
           // Phase 3: Measure clock offset and update sync metadata
+          // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
+          // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
           // This must not block recording - failures are logged but ignored
           if (unifiedSessionPath.value) {
             try {
@@ -1070,6 +1099,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         }
       }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       errors.push(error.message || 'Unknown start error')
       if (inWaterStarted) {
         const rollbackResult = await stopRecordingSensor('inWater')
@@ -1115,6 +1145,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         errors.push(`Surface: ${surfaceResult.error}`)
       }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       errors.push(error.message || 'Unknown stop error')
     } finally {
       clearUnifiedSessionState()
@@ -1144,6 +1175,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
 
     try {
+      // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
       const result = await window.electronAPI?.qsensorGetFusionStatus(path)
       if (result?.success && result.data) {
         const fusion = result.data.fusion
@@ -1161,6 +1193,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         fusionStatus.value = null
       }
     } catch (error: any) {
+      // TODO: Phase 3 - Enhance error messages for dual-API failures to include sensor context
       console.warn('[QSensor Store] Failed to refresh fusion status:', error)
       fusionStatus.value = null
     }

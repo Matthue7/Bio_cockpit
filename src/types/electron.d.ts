@@ -9,6 +9,8 @@ declare global {
   interface Window {
     electronAPI: {
       // Q-Sensor control APIs (bypasses CORS)
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorConnect: (
         baseUrl: string,
         port: string,
@@ -19,19 +21,27 @@ declare global {
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorGetHealth: (
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStartAcquisition: (
         baseUrl: string,
         pollHz?: number
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStopAcquisition: (
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStartRecording: (
         baseUrl: string,
         options: {
@@ -42,15 +52,20 @@ declare global {
         }
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStopRecording: (
         baseUrl: string,
         sessionId: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
       // Q-Sensor mirroring APIs
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
+      // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
       startQSensorMirror: (
         sessionId: string,
-        vehicleAddress: string,
+        apiBaseUrl: string,
         missionName: string,
         cadenceSec: number,
         fullBandwidth: boolean,
@@ -86,6 +101,7 @@ declare global {
       setQSensorSurfaceApiUrl: (apiUrl: string) => Promise<void>
 
       // Q-Sensor serial recording APIs (topside/surface sensor)
+      // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
       qsensorSerialConnect: (
         port: string,
         baudRate: number
@@ -117,6 +133,9 @@ declare global {
       qsensorSerialListPorts: () => Promise<{ success: boolean; data?: any; error?: string }>
 
       // Q-Sensor time sync APIs
+      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
+      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
+      // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
       measureClockOffset: (
         baseUrl: string
       ) => Promise<{
@@ -139,6 +158,7 @@ declare global {
       ) => Promise<{ success: boolean; error?: string }>
 
       // Q-Sensor fusion APIs
+      // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
       qsensorGetFusionStatus: (
         sessionRoot: string
       ) => Promise<{

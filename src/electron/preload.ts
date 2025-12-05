@@ -93,14 +93,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Q-Sensor mirroring
   startQSensorMirror: (
     sessionId: string,
-    vehicleAddress: string,
+    apiBaseUrl: string,
     missionName: string,
     cadenceSec: number,
     fullBandwidth: boolean,
     unifiedSessionTimestamp?: string,
     syncId?: string
   ) =>
-    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
+    ipcRenderer.invoke('qsensor:start-mirror', sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
   // Q-Sensor storage path
