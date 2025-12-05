@@ -9,8 +9,6 @@ declare global {
   interface Window {
     electronAPI: {
       // Q-Sensor control APIs (bypasses CORS)
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorConnect: (
         baseUrl: string,
         port: string,
@@ -21,27 +19,19 @@ declare global {
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorGetHealth: (
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStartAcquisition: (
         baseUrl: string,
         pollHz?: number
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStopAcquisition: (
         baseUrl: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStartRecording: (
         baseUrl: string,
         options: {
@@ -52,17 +42,12 @@ declare global {
         }
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
       qsensorStopRecording: (
         baseUrl: string,
         sessionId: string
       ) => Promise<{ success: boolean; data?: any; error?: string }>
 
       // Q-Sensor mirroring APIs
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
-      // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
       startQSensorMirror: (
         sessionId: string,
         apiBaseUrl: string,
@@ -101,7 +86,8 @@ declare global {
       setQSensorSurfaceApiUrl: (apiUrl: string) => Promise<void>
 
       // Q-Sensor serial recording APIs (topside/surface sensor)
-      // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
+      // NOTE: Surface sensor can use EITHER serial mode (direct topside connection)
+      //       OR API mode (HTTP to separate Pi). Choose via connection mode selector.
       qsensorSerialConnect: (
         port: string,
         baudRate: number
@@ -133,9 +119,6 @@ declare global {
       qsensorSerialListPorts: () => Promise<{ success: boolean; data?: any; error?: string }>
 
       // Q-Sensor time sync APIs
-      // TODO: Phase 3 - Add URL validation before HTTP calls to prevent malformed requests
-      // TODO: Phase 3 - Normalize URL to handle trailing slashes and protocol variations
-      // FIXME: Phase 3 - Implement per-sensor time sync measurements instead of global sync
       measureClockOffset: (
         baseUrl: string
       ) => Promise<{
@@ -146,6 +129,20 @@ declare global {
         error?: string | null
       }>
 
+      // PHASE 3B: Per-sensor time sync
+      updateSensorTimeSync: (
+        sessionRoot: string,
+        sensorId: 'inWater' | 'surface',
+        timeSync: {
+          method: string
+          offsetMs: number | null
+          uncertaintyMs: number | null
+          measuredAt: string | null
+          error?: string | null
+        }
+      ) => Promise<{ success: boolean; error?: string }>
+
+      // @deprecated Use updateSensorTimeSync
       updateSyncMetadata: (
         sessionRoot: string,
         timeSync: {
@@ -158,7 +155,8 @@ declare global {
       ) => Promise<{ success: boolean; error?: string }>
 
       // Q-Sensor fusion APIs
-      // TODO: Phase 3 - Add conditional logic for serial vs API surface sensors
+      // NOTE: Fusion works for both API and serial surface sensors.
+      //       Both modes write to unified session structure for fusion.
       qsensorGetFusionStatus: (
         sessionRoot: string
       ) => Promise<{

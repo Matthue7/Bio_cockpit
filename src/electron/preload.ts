@@ -158,6 +158,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Q-Sensor time sync
   measureClockOffset: (baseUrl: string) =>
     ipcRenderer.invoke('qsensor:measure-clock-offset', baseUrl),
+  updateSensorTimeSync: (
+    sessionRoot: string,
+    sensorId: 'inWater' | 'surface',
+    timeSync: {
+      method: string
+      offsetMs: number | null
+      uncertaintyMs: number | null
+      measuredAt: string | null
+      error?: string | null
+    }
+  ) => ipcRenderer.invoke('qsensor:update-sensor-time-sync', sessionRoot, sensorId, timeSync),
+  // @deprecated Use updateSensorTimeSync
   updateSyncMetadata: (
     sessionRoot: string,
     timeSync: {

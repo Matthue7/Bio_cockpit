@@ -375,7 +375,7 @@ function computeDriftModel(
   surfaceMarkers: ParsedSensorData['markers'],
   syncMetadata: SyncMetadata
 ): ComputedDriftModel | null {
-  const timeSyncOffset = syncMetadata.timeSync.offsetMs
+  const timeSyncOffset = syncMetadata.timeSync?.inWater?.offsetMs ?? null
   const hasSurfaceStart = !!surfaceMarkers.start
   const hasSurfaceStop = !!surfaceMarkers.stop
   const hasInWaterStart = !!inWaterMarkers.start
