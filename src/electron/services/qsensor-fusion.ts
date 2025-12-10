@@ -87,7 +87,11 @@ interface WideFormatRow {
 
 const WIDE_FORMAT_HEADER = 'timestamp,inwater_sensor_id,inwater_mode,inwater_value,inwater_TempC,inwater_Vin,surface_sensor_id,surface_mode,surface_value,surface_TempC,surface_Vin'
 const UNIFIED_CSV_FILENAME = 'unified_session.csv'
+
+// 50ms tolerance accounts for sensor timing jitter, serial transmission delays,
+// and slight clock skew between sensors during normal operation
 const ALIGNMENT_TOLERANCE_MS = 50
+
 const DRIFT_THRESHOLD_MS = 2  // Don't model drift if delta < 2ms (just noise)
 
 // ============================================================================
@@ -336,6 +340,109 @@ async function parseCsvFile(csvPath: string, source: string): Promise<ParsedSens
 // Drift Model Computation
 // ============================================================================
 
+// ============================================================================
+// Drift Model Strategy Helpers
+// ============================================================================
+
+/**
+ * Strategy A: Compute linear drift model when both sensors have START+STOP markers.
+ * Falls back to constant offset if drift delta is below threshold.
+ */
+function computeLinearDriftModel(
+  surfaceStart: number,
+  surfaceStop: number,
+  inWaterStart: number,
+  inWaterStop: number
+): ComputedDriftModel {
+  const sessionDuration = surfaceStop - surfaceStart
+  const startOffset = inWaterStart - surfaceStart
+  const endOffset = inWaterStop - surfaceStop
+  const driftDelta = Math.abs(endOffset - startOffset)
+
+  if (sessionDuration === 0 || driftDelta < DRIFT_THRESHOLD_MS) {
+    return { type: 'constant', startOffsetMs: (startOffset + endOffset) / 2 }
+  }
+
+  return {
+    type: 'linear',
+    startOffsetMs: startOffset,
+    endOffsetMs: endOffset,
+    driftRatePerMs: (endOffset - startOffset) / sessionDuration,
+    inWaterStartTime: inWaterStart,
+  }
+}
+
+/**
+ * Strategy B: Compute drift model when surface has START+STOP but in-water only has START.
+ * Uses time sync offset to estimate in-water STOP if available.
+ */
+function computeSynthesizedLinearDrift(
+  surfaceStart: number,
+  surfaceStop: number,
+  inWaterStart: number,
+  timeSyncOffset: number | null
+): ComputedDriftModel {
+  const sessionDuration = surfaceStop - surfaceStart
+  const startOffset = inWaterStart - surfaceStart
+
+  if (timeSyncOffset === null) {
+    console.warn('[QSensor Fusion] Missing in-water STOP marker; using single START marker only')
+    return { type: 'constant', startOffsetMs: startOffset }
+  }
+
+  console.log('[QSensor Fusion] Estimating in-water STOP marker from timeSync offset')
+  const estimatedInWaterStop = surfaceStop + timeSyncOffset
+  const endOffset = estimatedInWaterStop - surfaceStop
+  const driftDelta = Math.abs(endOffset - startOffset)
+
+  if (sessionDuration === 0 || driftDelta < DRIFT_THRESHOLD_MS) {
+    return { type: 'constant', startOffsetMs: (startOffset + endOffset) / 2 }
+  }
+
+  return {
+    type: 'linear',
+    startOffsetMs: startOffset,
+    endOffsetMs: endOffset,
+    driftRatePerMs: (endOffset - startOffset) / sessionDuration,
+    inWaterStartTime: inWaterStart,
+  }
+}
+
+/**
+ * Strategy C: Compute constant offset from START marker only.
+ */
+function computeConstantDriftModel(
+  surfaceStart: number,
+  inWaterStart: number | undefined,
+  timeSyncOffset: number | null
+): ComputedDriftModel | null {
+  let effectiveInWaterStart = inWaterStart
+
+  if (!effectiveInWaterStart && timeSyncOffset !== null) {
+    effectiveInWaterStart = surfaceStart + timeSyncOffset
+  }
+
+  if (effectiveInWaterStart !== undefined) {
+    const startOffset = effectiveInWaterStart - surfaceStart
+    return { type: 'constant', startOffsetMs: startOffset }
+  }
+
+  return null
+}
+
+/**
+ * Strategy D: Fallback to time sync offset when no markers are available.
+ */
+function computeZeroDriftFallback(timeSyncOffset: number | null): ComputedDriftModel | null {
+  if (timeSyncOffset !== null) {
+    console.warn('[QSensor Fusion] No sync markers detected; using timeSync offset only')
+    return { type: 'constant', startOffsetMs: timeSyncOffset }
+  }
+
+  console.warn('[QSensor Fusion] No sync markers or timeSync offset available; no drift correction applied')
+  return null
+}
+
 // * Log detected sync markers from both sensors
 function logDetectedMarkers(
   inWaterMarkers: ParsedSensorData['markers'],
@@ -369,7 +476,10 @@ function logDetectedMarkers(
   }
 }
 
-// * Compute drift model from sync markers and/or time sync metadata
+/**
+ * Compute drift model from sync markers and/or time sync metadata.
+ * Delegates to strategy helpers based on available markers.
+ */
 function computeDriftModel(
   inWaterMarkers: ParsedSensorData['markers'],
   surfaceMarkers: ParsedSensorData['markers'],
@@ -383,85 +493,36 @@ function computeDriftModel(
 
   // Case A: both sensors have START and STOP → prefer linear drift
   if (hasSurfaceStart && hasSurfaceStop && hasInWaterStart && hasInWaterStop) {
-    const surfaceStart = surfaceMarkers.start!.timestamp
-    const surfaceStop = surfaceMarkers.stop!.timestamp
-    const inWaterStart = inWaterMarkers.start!.timestamp
-    const inWaterStop = inWaterMarkers.stop!.timestamp
-    const sessionDuration = surfaceStop - surfaceStart
-
-    const startOffset = inWaterStart - surfaceStart
-    const endOffset = inWaterStop - surfaceStop
-    const driftDelta = Math.abs(endOffset - startOffset)
-
-    if (sessionDuration === 0 || driftDelta < DRIFT_THRESHOLD_MS) {
-      return { type: 'constant', startOffsetMs: (startOffset + endOffset) / 2 }
-    }
-
-    return {
-      type: 'linear',
-      startOffsetMs: startOffset,
-      endOffsetMs: endOffset,
-      driftRatePerMs: (endOffset - startOffset) / sessionDuration,
-      inWaterStartTime: inWaterStart,
-    }
+    return computeLinearDriftModel(
+      surfaceMarkers.start!.timestamp,
+      surfaceMarkers.stop!.timestamp,
+      inWaterMarkers.start!.timestamp,
+      inWaterMarkers.stop!.timestamp
+    )
   }
 
   // Case B: surface has START/STOP; in-water only START
   if (hasSurfaceStart && hasSurfaceStop && hasInWaterStart) {
-    const surfaceStart = surfaceMarkers.start!.timestamp
-    const surfaceStop = surfaceMarkers.stop!.timestamp
-    const inWaterStart = inWaterMarkers.start!.timestamp
-    const sessionDuration = surfaceStop - surfaceStart
-
-    const startOffset = inWaterStart - surfaceStart
-    if (timeSyncOffset === null) {
-      // Best effort constant offset with only start marker
-      console.warn('[QSensor Fusion] Missing in-water STOP marker; using single START marker only')
-      return { type: 'constant', startOffsetMs: startOffset }
-    }
-
-    // Estimate in-water stop using time sync offset
-    console.log('[QSensor Fusion] Estimating in-water STOP marker from timeSync offset')
-    const estimatedInWaterStop = surfaceStop + timeSyncOffset
-    const endOffset = estimatedInWaterStop - surfaceStop
-    const driftDelta = Math.abs(endOffset - startOffset)
-
-    if (sessionDuration === 0 || driftDelta < DRIFT_THRESHOLD_MS) {
-      return { type: 'constant', startOffsetMs: (startOffset + endOffset) / 2 }
-    }
-
-    return {
-      type: 'linear',
-      startOffsetMs: startOffset,
-      endOffsetMs: endOffset,
-      driftRatePerMs: (endOffset - startOffset) / sessionDuration,
-      inWaterStartTime: inWaterStart,
-    }
+    return computeSynthesizedLinearDrift(
+      surfaceMarkers.start!.timestamp,
+      surfaceMarkers.stop!.timestamp,
+      inWaterMarkers.start!.timestamp,
+      timeSyncOffset
+    )
   }
 
   // Case C: START only available (surface must exist)
   if (hasSurfaceStart) {
-    const surfaceStart = surfaceMarkers.start!.timestamp
-    let inWaterStart = inWaterMarkers.start?.timestamp
-
-    if (!inWaterStart && timeSyncOffset !== null) {
-      inWaterStart = surfaceStart + timeSyncOffset
-    }
-
-    if (inWaterStart !== undefined) {
-      const startOffset = inWaterStart - surfaceStart
-      return { type: 'constant', startOffsetMs: startOffset }
-    }
+    const result = computeConstantDriftModel(
+      surfaceMarkers.start!.timestamp,
+      inWaterMarkers.start?.timestamp,
+      timeSyncOffset
+    )
+    if (result) return result
   }
 
   // Case D: No markers, fall back to time sync offset if present
-  if (timeSyncOffset !== null) {
-    console.warn('[QSensor Fusion] No sync markers detected; using timeSync offset only')
-    return { type: 'constant', startOffsetMs: timeSyncOffset }
-  }
-
-  console.warn('[QSensor Fusion] No sync markers or timeSync offset available; no drift correction applied')
-  return null
+  return computeZeroDriftFallback(timeSyncOffset)
 }
 
 // * Log the drift model decision
@@ -566,8 +627,14 @@ async function updateSyncMetadataWithDriftInfo(
 // Wide-Format Alignment Functions
 // ============================================================================
 
-// * Build a consolidated timestamp axis by clustering nearby timestamps.
-// * This reduces redundant axis points that previously drove single-sensor rows.
+/**
+ * Build a consolidated timestamp axis by clustering nearby timestamps.
+ * This reduces redundant axis points that previously drove single-sensor rows.
+ *
+ * @param consolidationThresholdMs - 25ms default collapses timestamp clusters within
+ *   sensor sampling granularity (typical Q-Sensor sample rate ~40-100ms between readings).
+ *   Prevents creating redundant axis points from slight timing variations.
+ */
 function buildConsolidatedTimestampAxis(
   inWaterRows: CsvRow[],
   surfaceRows: CsvRow[],
@@ -763,6 +830,9 @@ function evaluateRowCreation(
 ): boolean {
   if (inWaterRow && surfaceRow) return true
 
+  // 2× tolerance multiplier (default 100ms) prevents creating single-sensor rows during
+  // brief misalignments. Only creates single-sensor rows when gap is significant enough
+  // to indicate sensors are genuinely out of sync (not just sampling phase difference).
   const significantGapThreshold = 2 * toleranceMs
   const timeSinceLastInWater = lastInWaterTime !== null ? timestamp - lastInWaterTime : Number.POSITIVE_INFINITY
   const timeSinceLastSurface = lastSurfaceTime !== null ? timestamp - lastSurfaceTime : Number.POSITIVE_INFINITY
