@@ -50,7 +50,7 @@ declare global {
       // Q-Sensor mirroring APIs
       startQSensorMirror: (
         sessionId: string,
-        vehicleAddress: string,
+        apiBaseUrl: string,
         missionName: string,
         cadenceSec: number,
         fullBandwidth: boolean,
@@ -86,6 +86,8 @@ declare global {
       setQSensorSurfaceApiUrl: (apiUrl: string) => Promise<void>
 
       // Q-Sensor serial recording APIs (topside/surface sensor)
+      // NOTE: Surface sensor can use EITHER serial mode (direct topside connection)
+      //       OR API mode (HTTP to separate Pi). Choose via connection mode selector.
       qsensorSerialConnect: (
         port: string,
         baudRate: number
@@ -127,6 +129,20 @@ declare global {
         error?: string | null
       }>
 
+      // PHASE 3B: Per-sensor time sync
+      updateSensorTimeSync: (
+        sessionRoot: string,
+        sensorId: 'inWater' | 'surface',
+        timeSync: {
+          method: string
+          offsetMs: number | null
+          uncertaintyMs: number | null
+          measuredAt: string | null
+          error?: string | null
+        }
+      ) => Promise<{ success: boolean; error?: string }>
+
+      // @deprecated Use updateSensorTimeSync
       updateSyncMetadata: (
         sessionRoot: string,
         timeSync: {
@@ -139,6 +155,8 @@ declare global {
       ) => Promise<{ success: boolean; error?: string }>
 
       // Q-Sensor fusion APIs
+      // NOTE: Fusion works for both API and serial surface sensors.
+      //       Both modes write to unified session structure for fusion.
       qsensorGetFusionStatus: (
         sessionRoot: string
       ) => Promise<{

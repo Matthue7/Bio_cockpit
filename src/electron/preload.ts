@@ -93,14 +93,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Q-Sensor mirroring
   startQSensorMirror: (
     sessionId: string,
-    vehicleAddress: string,
+    apiBaseUrl: string,
     missionName: string,
     cadenceSec: number,
     fullBandwidth: boolean,
     unifiedSessionTimestamp?: string,
     syncId?: string
   ) =>
-    ipcRenderer.invoke('qsensor:start-mirror', sessionId, vehicleAddress, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
+    ipcRenderer.invoke('qsensor:start-mirror', sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
   // Q-Sensor storage path
@@ -158,6 +158,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Q-Sensor time sync
   measureClockOffset: (baseUrl: string) =>
     ipcRenderer.invoke('qsensor:measure-clock-offset', baseUrl),
+  updateSensorTimeSync: (
+    sessionRoot: string,
+    sensorId: 'inWater' | 'surface',
+    timeSync: {
+      method: string
+      offsetMs: number | null
+      uncertaintyMs: number | null
+      measuredAt: string | null
+      error?: string | null
+    }
+  ) => ipcRenderer.invoke('qsensor:update-sensor-time-sync', sessionRoot, sensorId, timeSync),
+  // @deprecated Use updateSensorTimeSync
   updateSyncMetadata: (
     sessionRoot: string,
     timeSync: {

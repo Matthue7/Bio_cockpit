@@ -47,6 +47,14 @@ export interface DriftModel {
   endOffsetMs?: number              // Offset at session end (for linear)
 }
 
+export interface SensorTimeSync {
+  method: string
+  offsetMs: number | null
+  uncertaintyMs: number | null
+  measuredAt: string | null
+  error?: string | null
+}
+
 export interface SyncMetadata {
   schemaVersion: number
   mission: string
@@ -58,11 +66,8 @@ export interface SyncMetadata {
     surface: SyncMetadataSensorInfo | null
   }
   timeSync: {
-    method: string | null
-    offsetMs: number | null
-    uncertaintyMs: number | null
-    measuredAt: string | null
-    error: string | null
+    inWater: SensorTimeSync | null
+    surface: SensorTimeSync | null
     markers: SyncMarker[]           // Detected sync markers
     driftModel: DriftModel | null   // Computed drift correction model
   }
@@ -119,11 +124,8 @@ export async function ensureSyncMetadata(
         surface: null,
       },
       timeSync: {
-        method: null,
-        offsetMs: null,
-        uncertaintyMs: null,
-        measuredAt: null,
-        error: null,
+        inWater: null,
+        surface: null,
         markers: [],
         driftModel: null,
       },
@@ -156,6 +158,37 @@ export async function updateSyncMetadata(
   await writeSyncMetadataFile(sessionRoot, metadata)
 }
 
+export async function updateSensorTimeSync(
+  sessionRoot: string,
+  sensorId: SensorKey,
+  timeSync: SensorTimeSync
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await updateSyncMetadata(sessionRoot, (metadata) => {
+      // Ensure timeSync structure exists (backward compat)
+      if (!metadata.timeSync) {
+        metadata.timeSync = {
+          inWater: null,
+          surface: null,
+          markers: [],
+          driftModel: null,
+        }
+      }
+
+      metadata.timeSync[sensorId] = timeSync
+    })
+
+    console.log(
+      `[Session Utils] Updated ${sensorId} time sync: offset=${timeSync.offsetMs}ms, uncertainty=${timeSync.uncertaintyMs}ms`
+    )
+
+    return { success: true }
+  } catch (error: any) {
+    console.error(`[Session Utils] Failed to update ${sensorId} time sync:`, error)
+    return { success: false, error: error.message }
+  }
+}
+
 export async function updateSensorMetadata(
   sessionRoot: string,
   sensor: SensorKey,
@@ -186,6 +219,7 @@ export async function updateFusionStatus(
 // * Setup IPC handler for updating sync metadata timeSync field.
 // NOTE: Renderer uses this to push measured time sync values after capture.
 export function setupSyncMetadataIPC(): void {
+  // @deprecated Phase 3B: global sync is mapped to inWater sensor
   ipcMain.handle(
     'qsensor:update-sync-metadata',
     async (
@@ -199,24 +233,14 @@ export function setupSyncMetadataIPC(): void {
         error?: string | null
       }
     ) => {
-      try {
-        await updateSyncMetadata(sessionRoot, (metadata) => {
-          metadata.timeSync = {
-            ...metadata.timeSync,
-            method: timeSync.method,
-            offsetMs: timeSync.offsetMs,
-            uncertaintyMs: timeSync.uncertaintyMs,
-            measuredAt: timeSync.measuredAt,
-            error: timeSync.error ?? null,
-            markers: metadata.timeSync.markers || [],
-            driftModel: metadata.timeSync.driftModel ?? null,
-          }
-        })
-        return { success: true }
-      } catch (error: any) {
-        console.error('[QSensor Session Utils] Failed to update sync metadata:', error.message)
-        return { success: false, error: error.message }
-      }
+      return await updateSensorTimeSync(sessionRoot, 'inWater', timeSync)
+    }
+  )
+
+  ipcMain.handle(
+    'qsensor:update-sensor-time-sync',
+    async (_event, sessionRoot: string, sensorId: SensorKey, timeSync: SensorTimeSync) => {
+      return await updateSensorTimeSync(sessionRoot, sensorId, timeSync)
     }
   )
 

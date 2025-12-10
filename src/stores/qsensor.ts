@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { QSensorClient } from '@/libs/qsensor-client'
 import { createInitialSensorState, isSensorArmed, isSensorRecording, resetSensorState } from '@/stores/qsensor-common'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
+import { validateAndNormalizeQSensorUrl } from '@/electron/services/url-validator'
 
 /**
  * Serial port information returned from port enumeration
@@ -181,7 +182,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       const result = await window.electronAPI.startQSensorMirror(
         sensor.currentSession.sessionId,
-        vehicleAddress.value,
+        inWaterSensor.value.apiBaseUrl || 'http://blueos.local:9150',
         sensor.currentSession.mission,
         cadenceSec.value,
         fullBandwidth.value
@@ -351,30 +352,32 @@ export const useQSensorStore = defineStore('qsensor', () => {
       return { success: false, error: 'Surface sensor not found' }
     }
 
-    // Validate URL format
+    // PHASE 3: Validate and normalize URL using shared utility
     if (apiUrl && apiUrl.trim() !== '') {
+      const urlResult = validateAndNormalizeQSensorUrl(apiUrl, 'surface sensor')
+      if (!urlResult.success) {
+        return { success: false, error: urlResult.error }
+      }
+
+      // Save normalized URL
       try {
-        const url = new URL(apiUrl)
-        // Ensure it's HTTP/HTTPS
-        if (!url.protocol.startsWith('http')) {
-          return { success: false, error: 'API URL must use http:// or https://' }
-        }
-      } catch (error) {
-        return { success: false, error: 'Invalid URL format' }
+        await window.electronAPI.setQSensorSurfaceApiUrl(urlResult.normalizedUrl)
+        surface.apiBaseUrl = urlResult.normalizedUrl
+        console.log(`[QSensor Store] Surface API URL saved: ${urlResult.normalizedUrl}`)
+        return { success: true }
+      } catch (error: any) {
+        return { success: false, error: error.message || 'Failed to save URL' }
       }
     }
 
-    // Update surface sensor state
-    surface.apiBaseUrl = apiUrl || undefined
-
-    // Persist to config store
+    // Handle empty URL (clearing configuration)
+    surface.apiBaseUrl = undefined
     try {
-      await window.electronAPI.setQSensorSurfaceApiUrl(apiUrl)
-      console.log(`[QSensor Store] Surface API URL saved: ${apiUrl || '(empty)'}`)
+      await window.electronAPI.setQSensorSurfaceApiUrl('')
+      console.log('[QSensor Store] Surface API URL cleared')
       return { success: true }
     } catch (error: any) {
-      surface.lastError = error.message
-      return { success: false, error: error.message }
+      return { success: false, error: error.message || 'Failed to clear URL' }
     }
   }
 
@@ -504,23 +507,29 @@ export const useQSensorStore = defineStore('qsensor', () => {
           return { success: false, error: 'No API base URL configured' }
         }
 
-        // Phase 3: Log API URL being used
-        console.log(`[QSensor Store] Connecting via HTTP: apiBaseUrl="${sensor.apiBaseUrl}", port="/dev/ttyUSB0", baud=9600`)
+        // PHASE 3: Validate URL before connection
+        const urlResult = validateAndNormalizeQSensorUrl(sensor.apiBaseUrl, `${sensorId} sensor`)
+        if (!urlResult.success) {
+          sensor.lastError = urlResult.error
+          return { success: false, error: urlResult.error }
+        }
+
+        console.log(`[QSensor Store] Connecting via HTTP: apiBaseUrl="${urlResult.normalizedUrl}", port="/dev/ttyUSB0", baud=9600`)
 
         // Connect via HTTP backend (this establishes serial connection on Pi side)
-        result = await window.electronAPI.qsensorConnect(sensor.apiBaseUrl, '/dev/ttyUSB0', 9600)
+        result = await window.electronAPI.qsensorConnect(urlResult.normalizedUrl, '/dev/ttyUSB0', 9600)
 
         if (result.success) {
           sensor.isConnected = true
           sensor.lastError = null
 
           // Fetch health to get sensor config
-          const healthResult = await window.electronAPI.qsensorGetHealth(sensor.apiBaseUrl)
+          const healthResult = await window.electronAPI.qsensorGetHealth(urlResult.normalizedUrl)
           if (healthResult.success && healthResult.data) {
             sensor.healthData = healthResult.data
           }
         } else {
-          sensor.lastError = result.error || 'Connection failed'
+          sensor.lastError = `${sensorId} sensor connection failed: ${result.error || 'Unknown error'}`
         }
       } else if (sensor.backendType === 'serial') {
         // Surface sensor via direct serial (topside)
@@ -553,7 +562,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             sensor.healthData = healthResult.data
           }
         } else {
-          sensor.lastError = result.error || 'Connection failed'
+          sensor.lastError = `${sensorId} sensor connection failed: ${result.error || 'Unknown error'}`
         }
       } else {
         return { success: false, error: `Unknown backend type: ${sensor.backendType}` }
@@ -561,7 +570,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
-      sensor.lastError = error.message
+      sensor.lastError = `${sensorId} sensor error: ${error.message}`
       return { success: false, error: error.message }
     }
   }
@@ -611,7 +620,17 @@ export const useQSensorStore = defineStore('qsensor', () => {
         if (!sensor.apiBaseUrl) {
           return { success: false, error: 'No API base URL configured' }
         }
-        result = await window.electronAPI.qsensorDisconnect(sensor.apiBaseUrl)
+
+        // PHASE 3: Validate URL before disconnect
+        const urlResult = validateAndNormalizeQSensorUrl(sensor.apiBaseUrl, `${sensorId} sensor`)
+        if (!urlResult.success) {
+          console.warn(`[QSensor Store] Invalid URL during disconnect: ${urlResult.error}`)
+          // Still attempt disconnect with original URL for cleanup
+        }
+
+        result = await window.electronAPI.qsensorDisconnect(
+          urlResult.success ? urlResult.normalizedUrl : sensor.apiBaseUrl
+        )
       } else if (sensor.backendType === 'serial') {
         result = await window.electronAPI.qsensorSerialDisconnect()
       } else {
@@ -625,7 +644,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
-      sensor.lastError = error.message
+      sensor.lastError = `${sensorId} sensor error: ${error.message}`
       return { success: false, error: error.message }
     }
   }
@@ -727,17 +746,27 @@ export const useQSensorStore = defineStore('qsensor', () => {
           return { success: false, error: 'No API base URL configured' }
         }
 
+        // PHASE 3: Validate URL before all API calls
+        const urlResult = validateAndNormalizeQSensorUrl(sensor.apiBaseUrl, `${sensorId} sensor`)
+        if (!urlResult.success) {
+          return { success: false, error: urlResult.error }
+        }
+        const normalizedUrl = urlResult.normalizedUrl
+
         // Prefer shared syncId from surface session or provided explicitly
         const syncId = params.syncId || surfaceSensor.value.currentSession?.syncId
 
         // First, start acquisition on Pi side
-        const acqResult = await window.electronAPI.qsensorStartAcquisition(sensor.apiBaseUrl, params.rateHz)
+        const acqResult = await window.electronAPI.qsensorStartAcquisition(normalizedUrl, params.rateHz)
         if (!acqResult.success) {
-          return { success: false, error: acqResult.error || 'Failed to start acquisition' }
+          return {
+            success: false,
+            error: `${sensorId} sensor acquisition failed (${normalizedUrl}): ${acqResult.error || 'Unknown error'}`,
+          }
         }
 
         // Then, start recording on Pi side
-        const recResult = await window.electronAPI.qsensorStartRecording(sensor.apiBaseUrl, {
+        const recResult = await window.electronAPI.qsensorStartRecording(normalizedUrl, {
           mission: params.mission,
           rate_hz: params.rateHz,
           roll_interval_s: params.rollIntervalS,
@@ -745,13 +774,16 @@ export const useQSensorStore = defineStore('qsensor', () => {
         })
 
         if (!recResult.success) {
-          return { success: false, error: recResult.error || 'Failed to start recording' }
+          return {
+            success: false,
+            error: `${sensorId} sensor recording failed (${normalizedUrl}): ${recResult.error || 'Unknown error'}`,
+          }
         }
 
         // Now start mirroring (downloads data from Pi to desktop)
         const mirrorResult = await window.electronAPI.startQSensorMirror(
           recResult.data.session_id,
-          vehicleAddress.value,
+          normalizedUrl,
           params.mission,
           cadenceSec.value,
           fullBandwidth.value,
@@ -816,7 +848,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
-      sensor.lastError = error.message
+      sensor.lastError = `${sensorId} sensor error: ${error.message}`
       return { success: false, error: error.message }
     }
   }
@@ -901,7 +933,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
       return { success: result.success, error: result.error }
     } catch (error: any) {
-      sensor.lastError = error.message
+      sensor.lastError = `${sensorId} sensor error: ${error.message}`
       return { success: false, error: error.message }
     }
   }
@@ -1039,38 +1071,80 @@ export const useQSensorStore = defineStore('qsensor', () => {
           unifiedSessionId.value = `unified-${Date.now()}`
           console.log(`[QSensor Store] Started both sensors for mission: ${params.mission}`)
 
-          // Phase 3: Measure clock offset and update sync metadata
+          // Phase 3B: Per-sensor time sync measurements
           // This must not block recording - failures are logged but ignored
           if (unifiedSessionPath.value) {
-            try {
-              const baseUrl = inWaterSensor.value.apiBaseUrl || 'http://blueos.local:9150'
-              const timeSyncResult = await window.electronAPI.measureClockOffset(baseUrl)
-
-              // Update sync_metadata.json with time sync data
-              await window.electronAPI.updateSyncMetadata(unifiedSessionPath.value, {
-                method: timeSyncResult.method,
-                offsetMs: timeSyncResult.offsetMs,
-                uncertaintyMs: timeSyncResult.uncertaintyMs,
-                measuredAt: timeSyncResult.topsideResponseEnd,
-                error: timeSyncResult.error || null,
-              })
-
-              if (timeSyncResult.error) {
-                console.warn(`[QSensor Store] Time sync completed with error: ${timeSyncResult.error}`)
-              } else {
-                console.log(
-                  `[QSensor Store] Time sync: offset=${timeSyncResult.offsetMs}ms ±${timeSyncResult.uncertaintyMs}ms`
+            // In-water sensor time sync
+            if (inWaterSensor.value.apiBaseUrl) {
+              try {
+                const urlResult = validateAndNormalizeQSensorUrl(
+                  inWaterSensor.value.apiBaseUrl,
+                  'inWater sensor time sync'
                 )
+
+                if (urlResult.success) {
+                  const timeSync = await window.electronAPI.measureClockOffset(urlResult.normalizedUrl)
+
+                  await window.electronAPI.updateSensorTimeSync(unifiedSessionPath.value, 'inWater', {
+                    method: timeSync.method,
+                    offsetMs: timeSync.offsetMs,
+                    uncertaintyMs: timeSync.uncertaintyMs,
+                    measuredAt: timeSync.topsideResponseEnd,
+                    error: timeSync.error,
+                  })
+
+                  console.log(
+                    `[QSensor Store] In-water time sync: offset=${timeSync.offsetMs}ms ±${timeSync.uncertaintyMs}ms`
+                  )
+                } else {
+                  console.warn(`[QSensor Store] In-water time sync skipped: ${urlResult.error}`)
+                }
+              } catch (error: any) {
+                console.error('[QSensor Store] In-water time sync failed (recording continues):', error)
               }
-            } catch (timeSyncError: any) {
-              // Never block recording due to time sync failure
-              console.error('[QSensor Store] Time sync failed (recording continues):', timeSyncError.message)
+            }
+
+            // Surface sensor time sync (API mode only)
+            if (
+              surfaceSensor.value.backendType === 'http' &&
+              surfaceSensor.value.apiBaseUrl
+            ) {
+              try {
+                const urlResult = validateAndNormalizeQSensorUrl(
+                  surfaceSensor.value.apiBaseUrl,
+                  'surface sensor time sync'
+                )
+
+                if (urlResult.success) {
+                  const timeSync = await window.electronAPI.measureClockOffset(urlResult.normalizedUrl)
+
+                  await window.electronAPI.updateSensorTimeSync(unifiedSessionPath.value, 'surface', {
+                    method: timeSync.method,
+                    offsetMs: timeSync.offsetMs,
+                    uncertaintyMs: timeSync.uncertaintyMs,
+                    measuredAt: timeSync.topsideResponseEnd,
+                    error: timeSync.error,
+                  })
+
+                  console.log(
+                    `[QSensor Store] Surface time sync: offset=${timeSync.offsetMs}ms ±${timeSync.uncertaintyMs}ms`
+                  )
+                } else {
+                  console.warn(`[QSensor Store] Surface time sync skipped: ${urlResult.error}`)
+                }
+              } catch (error: any) {
+                console.error('[QSensor Store] Surface time sync failed (recording continues):', error)
+              }
+            } else if (surfaceSensor.value.backendType === 'serial') {
+              console.log('[QSensor Store] Surface sensor in serial mode - no Pi time sync performed')
+            } else {
+              console.log('[QSensor Store] Surface sensor backend not configured - no time sync performed')
             }
           }
         }
       }
     } catch (error: any) {
-      errors.push(error.message || 'Unknown start error')
+      errors.push(`Start recording error: ${error.message || 'Unknown error'}`)
       if (inWaterStarted) {
         const rollbackResult = await stopRecordingSensor('inWater')
         if (!rollbackResult.success) {
@@ -1115,7 +1189,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         errors.push(`Surface: ${surfaceResult.error}`)
       }
     } catch (error: any) {
-      errors.push(error.message || 'Unknown stop error')
+      errors.push(`Stop recording error: ${error.message || 'Unknown error'}`)
     } finally {
       clearUnifiedSessionState()
     }
@@ -1144,6 +1218,10 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
 
     try {
+      // PHASE 3: Fusion works for both API and serial surface sensors
+      // - API surface: data comes from mirrored files
+      // - Serial surface: data comes from direct serial recording
+      // Both write to unified session structure, fusion reads from there
       const result = await window.electronAPI?.qsensorGetFusionStatus(path)
       if (result?.success && result.data) {
         const fusion = result.data.fusion
@@ -1161,7 +1239,10 @@ export const useQSensorStore = defineStore('qsensor', () => {
         fusionStatus.value = null
       }
     } catch (error: any) {
-      console.warn('[QSensor Store] Failed to refresh fusion status:', error)
+      console.warn(
+        `[QSensor Store] Failed to refresh fusion status for ${unifiedSessionPath.value}:`,
+        error
+      )
       fusionStatus.value = null
     }
   }
