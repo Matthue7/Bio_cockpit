@@ -50,10 +50,17 @@ import type { QSensorState } from '@/types/qsensor'
 
 defineProps<{
   // * Sensor state providing health details
+  /**
+   *
+   */
   sensor: QSensorState
 }>()
 
 // * Human-readable formatter for byte values displayed in health info
+/**
+ *
+ * @param bytes
+ */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

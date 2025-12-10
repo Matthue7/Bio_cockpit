@@ -71,7 +71,6 @@ const MAX_RTT_MS = 200
  * - RTT = T4 - T1
  * - Offset = pi_unix_ms - (T1 + RTT/2)
  * - Uncertainty = RTT/2
- *
  * @param baseUrl - Pi API base URL (e.g., "http://blueos.local:9150")
  * @returns TimeSyncResult with offset, uncertainty, and timestamps
  */
@@ -134,9 +133,7 @@ export async function measureClockOffset(baseUrl: string): Promise<TimeSyncResul
       }
     }
 
-    console.log(
-      `[QSensor Time Sync] Offset: ${Math.round(offsetMs)}ms ±${Math.round(uncertaintyMs)}ms (RTT: ${rtt}ms)`
-    )
+    console.log(`[QSensor Time Sync] Offset: ${Math.round(offsetMs)}ms ±${Math.round(uncertaintyMs)}ms (RTT: ${rtt}ms)`)
 
     return {
       method: 'ntp_handshake_v1',

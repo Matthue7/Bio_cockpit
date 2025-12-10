@@ -100,7 +100,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     unifiedSessionTimestamp?: string,
     syncId?: string
   ) =>
-    ipcRenderer.invoke('qsensor:start-mirror', sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId),
+    ipcRenderer.invoke(
+      'qsensor:start-mirror',
+      sessionId,
+      apiBaseUrl,
+      missionName,
+      cadenceSec,
+      fullBandwidth,
+      unifiedSessionTimestamp,
+      syncId
+    ),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),
   // Q-Sensor storage path
@@ -113,7 +122,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Q-Sensor serial recording (topside/surface sensor)
   qsensorSerialConnect: (port: string, baudRate: number) => {
     console.log(`[Preload] qsensorSerialConnect called - port: ${port}, baudRate: ${baudRate}`)
-    return ipcRenderer.invoke('qsensor-serial:connect', port, baudRate)
+    return ipcRenderer
+      .invoke('qsensor-serial:connect', port, baudRate)
       .then((result: any) => {
         console.log('[Preload] qsensorSerialConnect result:', JSON.stringify(result))
         return result
@@ -156,8 +166,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('qsensor-serial:list-ports')
   },
   // Q-Sensor time sync
-  measureClockOffset: (baseUrl: string) =>
-    ipcRenderer.invoke('qsensor:measure-clock-offset', baseUrl),
+  measureClockOffset: (baseUrl: string) => ipcRenderer.invoke('qsensor:measure-clock-offset', baseUrl),
   updateSensorTimeSync: (
     sessionRoot: string,
     sensorId: 'inWater' | 'surface',
@@ -181,10 +190,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   ) => ipcRenderer.invoke('qsensor:update-sync-metadata', sessionRoot, timeSync),
   // Q-Sensor fusion
-  qsensorGetFusionStatus: (sessionRoot: string) =>
-    ipcRenderer.invoke('qsensor:get-fusion-status', sessionRoot),
-  qsensorTriggerManualFusion: (sessionRoot: string) =>
-    ipcRenderer.invoke('qsensor:trigger-manual-fusion', sessionRoot),
+  qsensorGetFusionStatus: (sessionRoot: string) => ipcRenderer.invoke('qsensor:get-fusion-status', sessionRoot),
+  qsensorTriggerManualFusion: (sessionRoot: string) => ipcRenderer.invoke('qsensor:trigger-manual-fusion', sessionRoot),
   getElectronLogContent: (logName: string) => ipcRenderer.invoke('get-electron-log-content', logName),
   deleteElectronLog: (logName: string) => ipcRenderer.invoke('delete-electron-log', logName),
   deleteOldElectronLogs: () => ipcRenderer.invoke('delete-old-electron-logs'),

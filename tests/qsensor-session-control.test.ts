@@ -1,16 +1,47 @@
 import { mount } from '@vue/test-utils'
+
 import QSensorSessionControl from '@/components/qsensor/QSensorSessionControl.vue'
 
 type StoreState = {
+  /**
+   *
+   */
   globalMissionName: string
+  /**
+   *
+   */
   isAnyRecording: boolean
+  /**
+   *
+   */
   areBothConnected: boolean
+  /**
+   *
+   */
   areBothRecording: boolean
+  /**
+   *
+   */
   totalBytesMirrored: number
+  /**
+   *
+   */
   unifiedSessionId: string | null
+  /**
+   *
+   */
   unifiedSessionPath: string | null
+  /**
+   *
+   */
   combinedErrors: string[]
+  /**
+   *
+   */
   startBoth: ReturnType<typeof vi.fn>
+  /**
+   *
+   */
   stopBoth: ReturnType<typeof vi.fn>
 }
 

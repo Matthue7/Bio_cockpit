@@ -48,7 +48,7 @@ import { isSensorRecording } from '@/stores/qsensor-common'
 
 const qsensorStore = useQSensorStore()
 
-let statsInterval: NodeJS.Timeout | null = null
+let statsInterval: ReturnType<typeof setInterval> | null = null
 
 // In-Water sensor status
 const inWaterStatusClass = computed(() => {

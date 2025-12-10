@@ -12,13 +12,7 @@
  * into a unified output directory structure (Phase 5+).
  */
 
-import type {
-  QSensorBackendType,
-  QSensorHealthData,
-  QSensorId,
-  QSensorSessionInfo,
-  QSensorState,
-} from '@/types/qsensor'
+import type { QSensorBackendType, QSensorId, QSensorState } from '@/types/qsensor'
 
 /**
  * Create initial state for a sensor.
@@ -214,11 +208,7 @@ export function validateConnectionMode(state: QSensorState): string | null {
  * @returns True if sensor can be connected
  */
 export function canConnectSensor(state: QSensorState): boolean {
-  return !!(
-    state.connectionMode &&
-    state.connectionModeExplicitlySet &&
-    validateSensorConfig(state) === null
-  )
+  return !!(state.connectionMode && state.connectionModeExplicitlySet && validateSensorConfig(state) === null)
 }
 
 /**
@@ -228,10 +218,5 @@ export function canConnectSensor(state: QSensorState): boolean {
  * @returns True if sensor can start recording
  */
 export function canRecordSensor(state: QSensorState): boolean {
-  return !!(
-    state.isConnected &&
-    state.connectionMode &&
-    state.connectionModeExplicitlySet &&
-    !isSensorRecording(state)
-  )
+  return !!(state.isConnected && state.connectionMode && state.connectionModeExplicitlySet && !isSensorRecording(state))
 }

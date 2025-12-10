@@ -200,7 +200,7 @@ const isInWaterRecording = computed(() => isSensorRecording(inWaterSensor.value)
 const isSurfaceRecording = computed(() => isSensorRecording(surfaceSensor.value))
 
 // Status polling interval
-let statusInterval: NodeJS.Timeout | null = null
+let statusInterval: ReturnType<typeof setInterval> | null = null
 
 // Logs
 /**

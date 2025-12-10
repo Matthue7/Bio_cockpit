@@ -85,18 +85,18 @@ function getStore(): Store<ElectronStoreSchema> {
 
 // Export a proxy that intercepts ALL property accesses
 const store = new Proxy({} as Store<ElectronStoreSchema>, {
-  get(_target, prop, receiver) {
-    const store = getStore()
-    const value = (store as any)[prop]
+  get(_target, prop, _receiver) {
+    const actualStore = getStore()
+    const value = (actualStore as unknown as Record<string, unknown>)[prop as string]
     // Bind methods to the store instance
     if (typeof value === 'function') {
-      return value.bind(store)
+      return value.bind(actualStore)
     }
     return value
   },
   set(_target, prop, value) {
-    const store = getStore()
-    ;(store as any)[prop] = value
+    const actualStore = getStore()
+    ;(actualStore as unknown as Record<string, unknown>)[prop as string] = value
     return true
   },
 })

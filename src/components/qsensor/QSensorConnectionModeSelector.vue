@@ -41,7 +41,13 @@ import { useQSensorStore } from '@/stores/qsensor'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
+  /**
+   *
+   */
   sensorId: QSensorId
+  /**
+   *
+   */
   sensor: QSensorState
 }>()
 
@@ -75,6 +81,9 @@ watch(
   { immediate: true }
 )
 
+/**
+ *
+ */
 function handleConnectionModeChange() {
   if (!selectedConnectionMode.value) return
 

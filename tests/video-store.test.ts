@@ -1,12 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { setActivePinia, createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
 // ---------------------------------------------------------------------------
 // Array prototype helper used in Cockpit (cosmos extensions)
 // ---------------------------------------------------------------------------
 declare global {
+  /**
+   *
+   */
   interface Array<T> {
+    /**
+     *
+     */
     isEmpty(): boolean
   }
 }
@@ -81,8 +87,14 @@ vi.mock('@/composables/snackbar', () => ({
 }))
 
 vi.mock('@/composables/webRTC', () => {
+  /**
+   *
+   */
   class MockWebRTCManager {
     availableStreams = ref([{ name: 'Stream 1' }])
+    /**
+     *
+     */
     startStream() {
       const mediaStream = ref({ active: true })
       const connected = ref(true)
@@ -91,6 +103,9 @@ vi.mock('@/composables/webRTC', () => {
         connected,
       }
     }
+    /**
+     *
+     */
     endAllSessions() {
       // noop
     }
@@ -104,7 +119,13 @@ vi.mock('@/libs/videoStorage', () => ({
 }))
 
 vi.mock('@/libs/live-video-processor', () => {
+  /**
+   *
+   */
   class MockLiveVideoProcessor {
+    /**
+     *
+     */
     async startProcessing(): Promise<void> {
       return
     }
@@ -153,6 +174,11 @@ vi.mock('@/stores/qsensor', () => ({
 // Stub alert class imports
 vi.mock('@/types/alert', () => ({
   Alert: class {
+    /**
+     *
+     * @param level
+     * @param message
+     */
     constructor(public level: unknown, public message: unknown) {
       this.level = level
       this.message = message
@@ -175,8 +201,15 @@ vi.mock('@/libs/sensors-logging', () => ({
 
 import { useVideoStore } from '../src/stores/video'
 
+/**
+ *
+ */
 class FakeMediaRecorder {
   public state = 'inactive'
+  /**
+   *
+   * @param _
+   */
   constructor(_: MediaStream) {}
   start = vi.fn()
   stop = vi.fn()
@@ -190,6 +223,9 @@ class FakeMediaRecorder {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ *
+ */
 function createStreamEntry() {
   const mediaRecorder = {
     start: vi.fn(),

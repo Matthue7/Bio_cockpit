@@ -41,8 +41,14 @@ import type { QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
   // * Display title for the card
+  /**
+   *
+   */
   title: string
   // * Sensor state rendered in the card
+  /**
+   *
+   */
   sensor: QSensorState
 }>()
 

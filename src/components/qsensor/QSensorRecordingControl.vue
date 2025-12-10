@@ -103,10 +103,19 @@ import type { QSensorId, QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
   // * Sensor identifier to control
+  /**
+   *
+   */
   sensorId: QSensorId
   // * Sensor state backing this UI
+  /**
+   *
+   */
   sensor: QSensorState
   // * Mission name associated with this recording
+  /**
+   *
+   */
   mission: string
 }>()
 
@@ -130,6 +139,9 @@ const localRollIntervalS = ref(60)
 const isRecording = computed(() => isSensorRecording(props.sensor))
 
 // * Start recording request handler
+/**
+ *
+ */
 async function handleStart() {
   // Phase 2: Validate connection mode
   if (!props.sensor.connectionMode) {
@@ -159,6 +171,9 @@ async function handleStart() {
 }
 
 // * Stop recording request handler
+/**
+ *
+ */
 async function handleStop() {
   isStopping.value = true
 
@@ -178,6 +193,10 @@ async function handleStop() {
 }
 
 // * Format ISO timestamp for session info display
+/**
+ *
+ * @param iso
+ */
 function formatTimestamp(iso: string): string {
   const date = new Date(iso)
   return date.toLocaleTimeString()

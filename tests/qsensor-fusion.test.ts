@@ -10,39 +10,83 @@
  * - evaluateRowCreation: gap detection and row suppression
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 // ============================================================================
 // Test Fixtures and Helpers
 // ============================================================================
 
+/**
+ *
+ */
 interface CsvRow {
+  /**
+   *
+   */
   timestamp: string
+  /**
+   *
+   */
   sensor_id: string
+  /**
+   *
+   */
   mode: string
+  /**
+   *
+   */
   value: string
+  /**
+   *
+   */
   TempC: string
+  /**
+   *
+   */
   Vin: string
+  /**
+   *
+   */
   source: string
+  /**
+   *
+   */
   _parsedTime: number
 }
 
+/**
+ *
+ */
 interface ComputedDriftModel {
+  /**
+   *
+   */
   type: 'constant' | 'linear'
+  /**
+   *
+   */
   startOffsetMs: number
+  /**
+   *
+   */
   driftRatePerMs?: number
+  /**
+   *
+   */
   endOffsetMs?: number
+  /**
+   *
+   */
   inWaterStartTime?: number
 }
 
 /**
  * Helper to create synthetic CSV rows for testing
+ * @param timestamp
+ * @param source
+ * @param sensorId
  */
-function makeRow(
-  timestamp: number,
-  source: string,
-  sensorId: string = 'TEST001'
-): CsvRow {
+function makeRow(timestamp: number, source: string, sensorId = 'TEST001'): CsvRow {
   return {
     timestamp: new Date(timestamp).toISOString(),
     sensor_id: sensorId,
@@ -60,10 +104,12 @@ function makeRow(
 // (These would normally be exported from qsensor-fusion.ts for testing)
 // ============================================================================
 
-function correctTimestamp(
-  inWaterTime: number,
-  driftModel: ComputedDriftModel | null
-): number {
+/**
+ *
+ * @param inWaterTime
+ * @param driftModel
+ */
+function correctTimestamp(inWaterTime: number, driftModel: ComputedDriftModel | null): number {
   if (!driftModel) {
     return inWaterTime
   }
@@ -78,18 +124,33 @@ function correctTimestamp(
   }
 
   const elapsed = inWaterTime - driftModel.inWaterStartTime
-  const currentOffset =
-    driftModel.startOffsetMs + driftModel.driftRatePerMs * elapsed
+  const currentOffset = driftModel.startOffsetMs + driftModel.driftRatePerMs * elapsed
   return inWaterTime - currentOffset
 }
 
+/**
+ *
+ * @param inWaterRows
+ * @param surfaceRows
+ * @param driftModel
+ * @param consolidationThresholdMs
+ */
 function buildConsolidatedTimestampAxis(
   inWaterRows: CsvRow[],
   surfaceRows: CsvRow[],
   driftModel: ComputedDriftModel | null,
-  consolidationThresholdMs: number = 25
+  consolidationThresholdMs = 25
 ): number[] {
-  type TimestampEntry = { time: number; source: string }
+  type TimestampEntry = {
+    /**
+     *
+     */
+    time: number
+    /**
+     *
+     */
+    source: string
+  }
 
   const allTimestamps: TimestampEntry[] = []
 
@@ -128,8 +189,23 @@ function buildConsolidatedTimestampAxis(
   return consolidated
 }
 
+/**
+ *
+ * @param cluster
+ */
 function computeRepresentativeTimestamp(
-  cluster: Array<{ time: number; source: string }>
+  cluster: Array<{
+    /**
+fffffffffffffffffffffffffffffffffffffffffffffffffffffffff *
+fffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+     */
+    time: number
+    /**
+tttttttttttttt *
+tttttttttttttt
+     */
+    source: string
+  }>
 ): number {
   const surfaceCandidate = cluster.find((item) => item.source === 'surface')
   if (surfaceCandidate) {
@@ -141,6 +217,13 @@ function computeRepresentativeTimestamp(
   return times.length % 2 === 0 ? (times[mid - 1] + times[mid]) / 2 : times[mid]
 }
 
+/**
+ *
+ * @param targetTime
+ * @param rowsMap
+ * @param toleranceMs
+ * @param usedReadings
+ */
 function findNearestReading(
   targetTime: number,
   rowsMap: Map<number, CsvRow>,
@@ -180,6 +263,16 @@ function findNearestReading(
   return nearestRow
 }
 
+/**
+ *
+ * @param timestamp
+ * @param inWaterRow
+ * @param surfaceRow
+ * @param lastInWaterTime
+ * @param lastSurfaceTime
+ * @param lastRowHadBothSensors
+ * @param toleranceMs
+ */
 function evaluateRowCreation(
   timestamp: number,
   inWaterRow: CsvRow | null,
@@ -192,25 +285,15 @@ function evaluateRowCreation(
   if (inWaterRow && surfaceRow) return true
 
   const significantGapThreshold = 2 * toleranceMs
-  const timeSinceLastInWater =
-    lastInWaterTime !== null
-      ? timestamp - lastInWaterTime
-      : Number.POSITIVE_INFINITY
-  const timeSinceLastSurface =
-    lastSurfaceTime !== null
-      ? timestamp - lastSurfaceTime
-      : Number.POSITIVE_INFINITY
+  const timeSinceLastInWater = lastInWaterTime !== null ? timestamp - lastInWaterTime : Number.POSITIVE_INFINITY
+  const timeSinceLastSurface = lastSurfaceTime !== null ? timestamp - lastSurfaceTime : Number.POSITIVE_INFINITY
 
   if (inWaterRow && !surfaceRow) {
-    return (
-      timeSinceLastSurface > significantGapThreshold || !lastRowHadBothSensors
-    )
+    return timeSinceLastSurface > significantGapThreshold || !lastRowHadBothSensors
   }
 
   if (surfaceRow && !inWaterRow) {
-    return (
-      timeSinceLastInWater > significantGapThreshold || !lastRowHadBothSensors
-    )
+    return timeSinceLastInWater > significantGapThreshold || !lastRowHadBothSensors
   }
 
   return false
@@ -226,12 +309,7 @@ describe('buildConsolidatedTimestampAxis', () => {
     const inWaterRows = [makeRow(baseTime, 'in-water'), makeRow(baseTime + 20, 'in-water')]
     const surfaceRows = [makeRow(baseTime + 10, 'surface')]
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      null,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, null, 25)
 
     // All three timestamps within 25ms should collapse to one
     expect(axis).toHaveLength(1)
@@ -243,12 +321,7 @@ describe('buildConsolidatedTimestampAxis', () => {
     const inWaterRows = [makeRow(baseTime, 'in-water')]
     const surfaceRows = [makeRow(baseTime + 50, 'surface')]
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      null,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, null, 25)
 
     // 50ms apart exceeds 25ms threshold → should produce 2 timestamps
     expect(axis).toHaveLength(2)
@@ -265,12 +338,7 @@ describe('buildConsolidatedTimestampAxis', () => {
     ]
     const surfaceRows = [makeRow(baseTime + 15, 'surface')]
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      null,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, null, 25)
 
     expect(axis).toHaveLength(1)
     expect(axis[0]).toBe(baseTime + 15) // Surface timestamp preferred
@@ -285,12 +353,7 @@ describe('buildConsolidatedTimestampAxis', () => {
     ]
     const surfaceRows: CsvRow[] = []
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      null,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, null, 25)
 
     expect(axis).toHaveLength(1)
     expect(axis[0]).toBe(baseTime + 10) // Median of [1000, 1010, 1020]
@@ -303,17 +366,9 @@ describe('buildConsolidatedTimestampAxis', () => {
       makeRow(baseTime + 100, 'in-water'),
       makeRow(baseTime + 200, 'in-water'),
     ]
-    const surfaceRows = [
-      makeRow(baseTime + 50, 'surface'),
-      makeRow(baseTime + 150, 'surface'),
-    ]
+    const surfaceRows = [makeRow(baseTime + 50, 'surface'), makeRow(baseTime + 150, 'surface')]
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      null,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, null, 25)
 
     // Verify axis is sorted
     for (let i = 1; i < axis.length; i++) {
@@ -331,12 +386,7 @@ describe('buildConsolidatedTimestampAxis', () => {
     const inWaterRows = [makeRow(baseTime + 100, 'in-water')] // Raw in-water time
     const surfaceRows = [makeRow(baseTime, 'surface')] // Surface time
 
-    const axis = buildConsolidatedTimestampAxis(
-      inWaterRows,
-      surfaceRows,
-      driftModel,
-      25
-    )
+    const axis = buildConsolidatedTimestampAxis(inWaterRows, surfaceRows, driftModel, 25)
 
     // After correction: in-water 1100 - 100 = 1000, matches surface 1000
     expect(axis).toHaveLength(1)
@@ -460,15 +510,7 @@ describe('evaluateRowCreation', () => {
     const inWaterRow = makeRow(1000, 'in-water')
     const surfaceRow = makeRow(1000, 'surface')
 
-    const shouldCreate = evaluateRowCreation(
-      1000,
-      inWaterRow,
-      surfaceRow,
-      null,
-      null,
-      false,
-      TOLERANCE
-    )
+    const shouldCreate = evaluateRowCreation(1000, inWaterRow, surfaceRow, null, null, false, TOLERANCE)
 
     expect(shouldCreate).toBe(true)
   })
@@ -531,29 +573,13 @@ describe('evaluateRowCreation', () => {
     const inWaterRow = makeRow(1000, 'in-water')
 
     // No lastSurfaceTime → timeSinceLastSurface = Infinity > threshold
-    const shouldCreate = evaluateRowCreation(
-      1000,
-      inWaterRow,
-      null,
-      null,
-      null,
-      false,
-      TOLERANCE
-    )
+    const shouldCreate = evaluateRowCreation(1000, inWaterRow, null, null, null, false, TOLERANCE)
 
     expect(shouldCreate).toBe(true)
   })
 
   it('should reject row with no data from either sensor', () => {
-    const shouldCreate = evaluateRowCreation(
-      1000,
-      null,
-      null,
-      null,
-      null,
-      false,
-      TOLERANCE
-    )
+    const shouldCreate = evaluateRowCreation(1000, null, null, null, null, false, TOLERANCE)
 
     expect(shouldCreate).toBe(false)
   })
@@ -563,15 +589,7 @@ describe('evaluateRowCreation', () => {
     const lastInWaterTime = 1000
 
     // Gap = 200ms > 100ms threshold
-    const shouldCreate = evaluateRowCreation(
-      1200,
-      null,
-      surfaceRow,
-      lastInWaterTime,
-      null,
-      true,
-      TOLERANCE
-    )
+    const shouldCreate = evaluateRowCreation(1200, null, surfaceRow, lastInWaterTime, null, true, TOLERANCE)
 
     expect(shouldCreate).toBe(true)
   })
@@ -582,15 +600,7 @@ describe('evaluateRowCreation', () => {
     const lastSurfaceTime = 1000
 
     // Gap = 55ms < 60ms threshold → suppress
-    const shouldCreate = evaluateRowCreation(
-      1055,
-      inWaterRow,
-      null,
-      null,
-      lastSurfaceTime,
-      true,
-      customTolerance
-    )
+    const shouldCreate = evaluateRowCreation(1055, inWaterRow, null, null, lastSurfaceTime, true, customTolerance)
 
     expect(shouldCreate).toBe(false)
   })

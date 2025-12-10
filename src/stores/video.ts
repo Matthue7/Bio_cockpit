@@ -471,7 +471,7 @@ export const useVideoStore = defineStore('video', () => {
       try {
         const qsensorStore = useQSensorStore()
         const mainVehicleStore = useMainVehicleStore()
-        const missionStore = useMissionStore()
+        // Note: missionStore is already declared at the top of this store
 
         // Attempt to get vehicle address from main vehicle store
         const vehicleAddress = mainVehicleStore.mainVehicle?.hostname || 'blueos.local'

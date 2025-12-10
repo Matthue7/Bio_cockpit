@@ -5,11 +5,12 @@
  * including chunk writing, manifest management, and session finalization.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import * as fs from 'fs/promises'
-import * as path from 'path'
-import * as os from 'os'
 import * as crypto from 'crypto'
+import * as fs from 'fs/promises'
+import * as os from 'os'
+import * as path from 'path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { QSeriesLocalRecorder } from '../src/electron/services/qsensor-local-recorder'
 import { QSeriesReading } from '../src/electron/services/qsensor-protocol'
 import { readSyncMetadata } from '../src/electron/services/qsensor-session-utils'
@@ -20,11 +21,18 @@ import { readSyncMetadata } from '../src/electron/services/qsensor-session-utils
 
 let testDir: string
 
+/**
+ *
+ */
 async function createTestDir(): Promise<string> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'qsensor-test-'))
   return tmpDir
 }
 
+/**
+ *
+ * @param dir
+ */
 async function cleanupTestDir(dir: string): Promise<void> {
   try {
     await fs.rm(dir, { recursive: true, force: true })
@@ -33,7 +41,12 @@ async function cleanupTestDir(dir: string): Promise<void> {
   }
 }
 
-function createMockReading(value: number, sensorId: string = 'SN12345'): QSeriesReading {
+/**
+ *
+ * @param value
+ * @param sensorId
+ */
+function createMockReading(value: number, sensorId = 'SN12345'): QSeriesReading {
   return {
     timestamp_utc: new Date().toISOString(),
     timestamp_monotonic_ns: BigInt(Math.floor(performance.now() * 1e6)),
@@ -45,25 +58,49 @@ function createMockReading(value: number, sensorId: string = 'SN12345'): QSeries
   }
 }
 
+/**
+ *
+ * @param filePath
+ */
 async function computeSHA256(filePath: string): Promise<string> {
   const buffer = await fs.readFile(filePath)
   return crypto.createHash('sha256').update(buffer).digest('hex')
 }
 
+/**
+ *
+ * @param rec
+ * @param sessionId
+ */
 async function flushSession(rec: QSeriesLocalRecorder, sessionId: string): Promise<void> {
   await (rec as any).flushChunk(sessionId)
 }
 
+/**
+ *
+ * @param rec
+ * @param sessionId
+ */
 function getInternalSession(rec: QSeriesLocalRecorder, sessionId: string): any {
   return (rec as any).sessions.get(sessionId)
 }
 
+/**
+ *
+ * @param rec
+ * @param sessionId
+ */
 async function forceChunkRoll(rec: QSeriesLocalRecorder, sessionId: string): Promise<void> {
   const session = getInternalSession(rec, sessionId)
   session.lastChunkRollTime = Date.now() - session.rollIntervalS * 1000 - 1
   await flushSession(rec, sessionId)
 }
 
+/**
+ *
+ * @param rec
+ * @param sessionId
+ */
 async function finalizeChunk(rec: QSeriesLocalRecorder, sessionId: string): Promise<void> {
   const session = getInternalSession(rec, sessionId)
   await (rec as any).finalizeCurrentChunk(session)
@@ -263,11 +300,13 @@ describe('QSeriesLocalRecorder', () => {
       const sessionDir = path.join(testDir, 'test-mission', `surface_${session.session_id}`)
       const sessionCsvPath = path.join(sessionDir, 'session.csv')
 
-      // session.csv should exist with just header
+      // session.csv should exist with header + SYNC_START + SYNC_STOP markers (2 sync rows)
       const sessionCsvContent = await fs.readFile(sessionCsvPath, 'utf-8')
       const lines = sessionCsvContent.split('\n').filter((line) => line.trim() !== '')
-      expect(lines.length).toBe(1) // Just header
+      expect(lines.length).toBe(3) // Header + 2 sync markers
       expect(lines[0]).toBe('timestamp,sensor_id,mode,value,TempC,Vin')
+      expect(lines[1]).toContain('SYNC_START')
+      expect(lines[2]).toContain('SYNC_STOP')
     })
 
     it('should handle high-rate data stream', async () => {
@@ -322,12 +361,14 @@ describe('QSeriesLocalRecorder', () => {
       const lines = chunkContent.split('\n').filter((line) => line.trim() !== '')
 
       expect(lines[0]).toBe('timestamp,sensor_id,mode,value,TempC,Vin')
-      expect(lines[1]).toContain('2025-11-18T12:00:00.123456+00:00')
-      expect(lines[1]).toContain('SN99999')
-      expect(lines[1]).toContain('freerun')
-      expect(lines[1]).toContain('123.456789')
-      expect(lines[1]).toContain('21.34')
-      expect(lines[1]).toContain('12.345')
+      // Line 1 is SYNC_START marker, line 2 is our actual reading
+      expect(lines[1]).toContain('SYNC_START')
+      expect(lines[2]).toContain('2025-11-18T12:00:00.123456+00:00')
+      expect(lines[2]).toContain('SN99999')
+      expect(lines[2]).toContain('freerun')
+      expect(lines[2]).toContain('123.456789')
+      expect(lines[2]).toContain('21.34')
+      expect(lines[2]).toContain('12.345')
 
       await recorder.stopSession(session.session_id)
     })
@@ -357,8 +398,10 @@ describe('QSeriesLocalRecorder', () => {
       const chunkContent = await fs.readFile(chunkTmpPath, 'utf-8')
       const lines = chunkContent.split('\n').filter((line) => line.trim() !== '')
 
-      expect(lines[1]).toContain('999')
-      const columns = lines[1].split(',')
+      // Line 1 is SYNC_START marker, line 2 is our actual reading with optional fields
+      expect(lines[1]).toContain('SYNC_START')
+      expect(lines[2]).toContain('999')
+      const columns = lines[2].split(',')
       expect(columns).toHaveLength(6)
       expect(columns[4]).toBe('')
       expect(columns[5]).toBe('')
@@ -387,7 +430,12 @@ describe('QSeriesLocalRecorder', () => {
       const manifest = JSON.parse(manifestContent)
 
       // Verify session.csv SHA256 (if chunks were created and deleted)
-      if (await fs.access(sessionCsvPath).then(() => true, () => false)) {
+      if (
+        await fs.access(sessionCsvPath).then(
+          () => true,
+          () => false
+        )
+      ) {
         const actualSHA256 = await computeSHA256(sessionCsvPath)
         // We can't verify against manifest chunks since they're deleted,
         // but we can verify the checksum is valid hex
@@ -446,7 +494,7 @@ describe('QSeriesLocalRecorder', () => {
         for (let i = 0; i < 30; i++) {
           recorder.addReading(session.session_id, createMockReading(batch * 30 + i))
         }
-      await forceChunkRoll(recorder, session.session_id)
+        await forceChunkRoll(recorder, session.session_id)
       }
 
       await recorder.stopSession(session.session_id)
@@ -517,7 +565,8 @@ describe('QSeriesLocalRecorder', () => {
       const sessionCsvDataRows = sessionCsvLines.length - 1 // Exclude header
 
       expect(manifest.total_rows).toBe(sessionCsvDataRows)
-      expect(manifest.total_rows).toBe(numReadings)
+      // Total includes SYNC_START + numReadings + SYNC_STOP = numReadings + 2
+      expect(manifest.total_rows).toBe(numReadings + 2)
     })
   })
 
@@ -586,7 +635,8 @@ describe('QSeriesLocalRecorder', () => {
       const sessionCsvContent = await fs.readFile(sessionCsvPath, 'utf-8')
       const lines = sessionCsvContent.split('\n').filter((line) => line.trim() !== '')
 
-      expect(lines.length - 1).toBe(10000) // 10k data rows + 1 header
+      // 10k data rows + SYNC_START + SYNC_STOP + 1 header = 10003 total, 10002 data rows
+      expect(lines.length - 1).toBe(10002)
     })
 
     it('should throw error for invalid session ID', async () => {

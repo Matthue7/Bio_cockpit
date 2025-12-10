@@ -5,14 +5,35 @@
  * ensuring consistent URL formatting across dual-API Q-Sensor operations.
  */
 
+/**
+ *
+ */
 export interface ValidatedUrl {
+  /**
+   *
+   */
   success: true
+  /**
+   *
+   */
   normalizedUrl: string
 }
 
+/**
+ *
+ */
 export interface UrlValidationError {
+  /**
+   *
+   */
   success: false
+  /**
+   *
+   */
   error: string
+  /**
+   *
+   */
   originalUrl: string
 }
 
@@ -26,11 +47,9 @@ export type UrlValidationResult = ValidatedUrl | UrlValidationError
  * - Remove trailing slashes for consistency
  * - Hostname must be valid (not empty)
  * - Port is optional (defaults to 80/443)
- *
  * @param url - The URL to validate and normalize
  * @param context - Optional context for error messages (e.g., "inWater sensor", "surface sensor")
  * @returns Validation result with normalized URL or error details
- *
  * @example
  * ```typescript
  * const result = validateAndNormalizeQSensorUrl('http://blueos.local:9150/', 'inWater sensor')
@@ -41,10 +60,7 @@ export type UrlValidationResult = ValidatedUrl | UrlValidationError
  * }
  * ```
  */
-export function validateAndNormalizeQSensorUrl(
-  url: string,
-  context?: string
-): UrlValidationResult {
+export function validateAndNormalizeQSensorUrl(url: string, context?: string): UrlValidationResult {
   if (!url || url.trim() === '') {
     return {
       success: false,

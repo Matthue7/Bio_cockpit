@@ -1,83 +1,240 @@
 // * TIME ALIGNMENT: currently uses raw UTC timestamps; future offset correction reads sync_metadata.timeSync.offsetMs.
 
+import { ipcMain } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { ipcMain } from 'electron'
-import { SyncMetadata, SyncMarker, DriftModel, readSyncMetadata, updateSyncMetadata } from './qsensor-session-utils'
+
+import { readSyncMetadata, SyncMarker, SyncMetadata, updateSyncMetadata } from './qsensor-session-utils'
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
+/**
+ *
+ */
 export interface FusionResult {
+  /**
+   *
+   */
   success: boolean
+  /**
+   *
+   */
   unifiedCsvPath?: string
+  /**
+   *
+   */
   totalRows?: number
+  /**
+   *
+   */
   inWaterRows?: number
+  /**
+   *
+   */
   surfaceRows?: number
+  /**
+   *
+   */
   error?: string
 }
 
+/**
+ *
+ */
 export interface FusionStatus {
+  /**
+   *
+   */
   status: 'pending' | 'complete' | 'skipped' | 'failed'
+  /**
+   *
+   */
   unifiedCsv: string | null
+  /**
+   *
+   */
   rowCount: number | null
+  /**
+   *
+   */
   inWaterRows: number | null
+  /**
+   *
+   */
   surfaceRows: number | null
+  /**
+   *
+   */
   completedAt: string | null
+  /**
+   *
+   */
   error: string | null
 }
 
+/**
+ *
+ */
 interface CsvRow {
+  /**
+   *
+   */
   timestamp: string
+  /**
+   *
+   */
   sensor_id: string
+  /**
+   *
+   */
   mode: string
+  /**
+   *
+   */
   value: string
+  /**
+   *
+   */
   TempC: string
+  /**
+   *
+   */
   Vin: string
+  /**
+   *
+   */
   source: string
   // Parsed timestamp for sorting
+  /**
+   *
+   */
   _parsedTime: number
 }
 
 // Extracted sync marker from CSV
+/**
+ *
+ */
 interface ExtractedMarker {
+  /**
+   *
+   */
   type: 'START' | 'STOP'
-  timestamp: number  // Epoch ms
+  /**
+   *
+   */
+  timestamp: number // Epoch ms
+  /**
+   *
+   */
   syncId: string
 }
 
 // Parsed sensor data with markers separated from data rows
+/**
+ *
+ */
 interface ParsedSensorData {
+  /**
+   *
+   */
   rows: CsvRow[]
+  /**
+   *
+   */
   markers: {
+    /**
+     *
+     */
     start?: ExtractedMarker
+    /**
+     *
+     */
     stop?: ExtractedMarker
   }
 }
 
 // Internal drift model for computation
+/**
+ *
+ */
 interface ComputedDriftModel {
+  /**
+   *
+   */
   type: 'constant' | 'linear'
+  /**
+   *
+   */
   startOffsetMs: number
-  driftRatePerMs?: number  // For linear: ms drift per ms elapsed
+  /**
+   *
+   */
+  driftRatePerMs?: number // For linear: ms drift per ms elapsed
+  /**
+   *
+   */
   endOffsetMs?: number
-  inWaterStartTime?: number  // Reference point for linear interpolation
+  /**
+   *
+   */
+  inWaterStartTime?: number // Reference point for linear interpolation
 }
 
 // Wide-format row for unified output
+/**
+ *
+ */
 interface WideFormatRow {
+  /**
+   *
+   */
   timestamp: string
+  /**
+   *
+   */
   _parsedTime: number
+  /**
+   *
+   */
   inwater_sensor_id: string | null
+  /**
+   *
+   */
   inwater_mode: string | null
+  /**
+   *
+   */
   inwater_value: string | null
+  /**
+   *
+   */
   inwater_TempC: string | null
+  /**
+   *
+   */
   inwater_Vin: string | null
+  /**
+   *
+   */
   surface_sensor_id: string | null
+  /**
+   *
+   */
   surface_mode: string | null
+  /**
+   *
+   */
   surface_value: string | null
+  /**
+   *
+   */
   surface_TempC: string | null
+  /**
+   *
+   */
   surface_Vin: string | null
 }
 
@@ -85,14 +242,15 @@ interface WideFormatRow {
 // Constants
 // ============================================================================
 
-const WIDE_FORMAT_HEADER = 'timestamp,inwater_sensor_id,inwater_mode,inwater_value,inwater_TempC,inwater_Vin,surface_sensor_id,surface_mode,surface_value,surface_TempC,surface_Vin'
+const WIDE_FORMAT_HEADER =
+  'timestamp,inwater_sensor_id,inwater_mode,inwater_value,inwater_TempC,inwater_Vin,surface_sensor_id,surface_mode,surface_value,surface_TempC,surface_Vin'
 const UNIFIED_CSV_FILENAME = 'unified_session.csv'
 
 // 50ms tolerance accounts for sensor timing jitter, serial transmission delays,
 // and slight clock skew between sensors during normal operation
 const ALIGNMENT_TOLERANCE_MS = 50
 
-const DRIFT_THRESHOLD_MS = 2  // Don't model drift if delta < 2ms (just noise)
+const DRIFT_THRESHOLD_MS = 2 // Don't model drift if delta < 2ms (just noise)
 
 // ============================================================================
 // Main Fusion Function
@@ -100,10 +258,12 @@ const DRIFT_THRESHOLD_MS = 2  // Don't model drift if delta < 2ms (just noise)
 
 // * Fuse in-water and surface session data into a unified CSV file.
 // * Steps: read both session.csv files, tag rows by source, sort by timestamp, write unified_session.csv, update sync_metadata.
-export async function fuseSessionData(
-  sessionRoot: string,
-  syncMetadata: SyncMetadata
-): Promise<FusionResult> {
+/**
+ *
+ * @param sessionRoot
+ * @param syncMetadata
+ */
+export async function fuseSessionData(sessionRoot: string, syncMetadata: SyncMetadata): Promise<FusionResult> {
   console.log(`[QSensor Fusion] Starting fusion for ${sessionRoot}`)
 
   try {
@@ -120,12 +280,8 @@ export async function fuseSessionData(
     }
 
     // Build full paths
-    const inWaterCsvPath = inWaterInfo?.sessionCsv
-      ? path.join(sessionRoot, inWaterInfo.sessionCsv)
-      : null
-    const surfaceCsvPath = surfaceInfo?.sessionCsv
-      ? path.join(sessionRoot, surfaceInfo.sessionCsv)
-      : null
+    const inWaterCsvPath = inWaterInfo?.sessionCsv ? path.join(sessionRoot, inWaterInfo.sessionCsv) : null
+    const surfaceCsvPath = surfaceInfo?.sessionCsv ? path.join(sessionRoot, surfaceInfo.sessionCsv) : null
 
     console.log(`[QSensor Fusion] In-water CSV: ${inWaterCsvPath ?? 'none'}`)
     console.log(`[QSensor Fusion] Surface CSV: ${surfaceCsvPath ?? 'none'}`)
@@ -176,21 +332,13 @@ export async function fuseSessionData(
     logDetectedMarkers(inWaterData.markers, surfaceData.markers)
 
     // Compute drift model from markers and/or time sync
-    const driftModel = computeDriftModel(
-      inWaterData.markers,
-      surfaceData.markers,
-      syncMetadata
-    )
+    const driftModel = computeDriftModel(inWaterData.markers, surfaceData.markers, syncMetadata)
 
     // Log drift model decision
     logDriftModel(driftModel, syncMetadata)
 
     // Build timestamp axis from both sensors using drift model
-    const timestampAxis = buildConsolidatedTimestampAxis(
-      inWaterData.rows,
-      surfaceData.rows,
-      driftModel
-    )
+    const timestampAxis = buildConsolidatedTimestampAxis(inWaterData.rows, surfaceData.rows, driftModel)
     console.log(`[QSensor Fusion] Timestamp axis: ${timestampAxis.length} consolidated timestamps`)
 
     // Build row maps for fast lookup with drift correction
@@ -201,12 +349,7 @@ export async function fuseSessionData(
     await updateSyncMetadataWithDriftInfo(sessionRoot, inWaterData.markers, surfaceData.markers, driftModel)
 
     // Create wide-format aligned rows
-    const wideRows = createWideFormatRows(
-      timestampAxis,
-      inWaterMap,
-      surfaceMap,
-      ALIGNMENT_TOLERANCE_MS
-    )
+    const wideRows = createWideFormatRows(timestampAxis, inWaterMap, surfaceMap, ALIGNMENT_TOLERANCE_MS)
     console.log(`[QSensor Fusion] Wide-format rows: ${wideRows.length} total`)
 
     // Count rows with data from each sensor and alignment statistics
@@ -228,7 +371,9 @@ export async function fuseSessionData(
 
     console.log(`[QSensor Fusion] ✓ Created ${unifiedCsvPath}`)
     console.log(`[QSensor Fusion] ✓ Alignment: ${rowsWithBoth} matched both sensors, ${unmatched} unmatched`)
-    console.log(`[QSensor Fusion] ✓ Summary: in-water=${rowsWithInWater}, surface=${rowsWithSurface}, total=${wideRows.length}`)
+    console.log(
+      `[QSensor Fusion] ✓ Summary: in-water=${rowsWithInWater}, surface=${rowsWithSurface}, total=${wideRows.length}`
+    )
 
     return {
       success: true,
@@ -253,6 +398,11 @@ export async function fuseSessionData(
 // * Parse a session.csv file and tag rows with source.
 // * Expected input schema: timestamp,sensor_id,mode,value,TempC,Vin; rows with bad timestamps are skipped.
 // * Extracts sync markers (SYNC_START, SYNC_STOP) and separates them from data rows.
+/**
+ *
+ * @param csvPath
+ * @param source
+ */
 async function parseCsvFile(csvPath: string, source: string): Promise<ParsedSensorData> {
   const content = await fs.readFile(csvPath, 'utf-8')
   const lines = content.split('\n')
@@ -303,9 +453,9 @@ async function parseCsvFile(csvPath: string, source: string): Promise<ParsedSens
       markers.start = {
         type: 'START',
         timestamp: parsedTime,
-        syncId: value,  // syncId stored in value field
+        syncId: value, // syncId stored in value field
       }
-      continue  // Don't add marker to data rows
+      continue // Don't add marker to data rows
     }
 
     if (mode === 'SYNC_STOP') {
@@ -314,7 +464,7 @@ async function parseCsvFile(csvPath: string, source: string): Promise<ParsedSens
         timestamp: parsedTime,
         syncId: value,
       }
-      continue  // Don't add marker to data rows
+      continue // Don't add marker to data rows
     }
 
     rows.push({
@@ -347,6 +497,10 @@ async function parseCsvFile(csvPath: string, source: string): Promise<ParsedSens
 /**
  * Strategy A: Compute linear drift model when both sensors have START+STOP markers.
  * Falls back to constant offset if drift delta is below threshold.
+ * @param surfaceStart
+ * @param surfaceStop
+ * @param inWaterStart
+ * @param inWaterStop
  */
 function computeLinearDriftModel(
   surfaceStart: number,
@@ -375,6 +529,10 @@ function computeLinearDriftModel(
 /**
  * Strategy B: Compute drift model when surface has START+STOP but in-water only has START.
  * Uses time sync offset to estimate in-water STOP if available.
+ * @param surfaceStart
+ * @param surfaceStop
+ * @param inWaterStart
+ * @param timeSyncOffset
  */
 function computeSynthesizedLinearDrift(
   surfaceStart: number,
@@ -410,6 +568,9 @@ function computeSynthesizedLinearDrift(
 
 /**
  * Strategy C: Compute constant offset from START marker only.
+ * @param surfaceStart
+ * @param inWaterStart
+ * @param timeSyncOffset
  */
 function computeConstantDriftModel(
   surfaceStart: number,
@@ -432,6 +593,7 @@ function computeConstantDriftModel(
 
 /**
  * Strategy D: Fallback to time sync offset when no markers are available.
+ * @param timeSyncOffset
  */
 function computeZeroDriftFallback(timeSyncOffset: number | null): ComputedDriftModel | null {
   if (timeSyncOffset !== null) {
@@ -444,6 +606,11 @@ function computeZeroDriftFallback(timeSyncOffset: number | null): ComputedDriftM
 }
 
 // * Log detected sync markers from both sensors
+/**
+ *
+ * @param inWaterMarkers
+ * @param surfaceMarkers
+ */
 function logDetectedMarkers(
   inWaterMarkers: ParsedSensorData['markers'],
   surfaceMarkers: ParsedSensorData['markers']
@@ -456,7 +623,9 @@ function logDetectedMarkers(
   if (surfaceMarkers.start) surfaceStatus.push('START')
   if (surfaceMarkers.stop) surfaceStatus.push('STOP')
 
-  console.log(`[QSensor Fusion] Surface markers: ${surfaceStatus.length > 0 ? surfaceStatus.join('+') + '=measured' : 'none'}`)
+  console.log(
+    `[QSensor Fusion] Surface markers: ${surfaceStatus.length > 0 ? surfaceStatus.join('+') + '=measured' : 'none'}`
+  )
 
   if (inWaterStatus.length > 0) {
     console.log(`[QSensor Fusion] In-water markers: ${inWaterStatus.join('+')}=measured`)
@@ -467,18 +636,25 @@ function logDetectedMarkers(
 
   if (surfaceMarkers.start && inWaterMarkers.start) {
     const match = surfaceMarkers.start.syncId === inWaterMarkers.start.syncId ? 'MATCH' : 'MISMATCH'
-    console.log(`[QSensor Fusion] START syncId ${match}: surface=${surfaceMarkers.start.syncId}, in-water=${inWaterMarkers.start.syncId}`)
+    console.log(
+      `[QSensor Fusion] START syncId ${match}: surface=${surfaceMarkers.start.syncId}, in-water=${inWaterMarkers.start.syncId}`
+    )
   }
 
   if (surfaceMarkers.stop && inWaterMarkers.stop) {
     const match = surfaceMarkers.stop.syncId === inWaterMarkers.stop.syncId ? 'MATCH' : 'MISMATCH'
-    console.log(`[QSensor Fusion] STOP syncId ${match}: surface=${surfaceMarkers.stop.syncId}, in-water=${inWaterMarkers.stop.syncId}`)
+    console.log(
+      `[QSensor Fusion] STOP syncId ${match}: surface=${surfaceMarkers.stop.syncId}, in-water=${inWaterMarkers.stop.syncId}`
+    )
   }
 }
 
 /**
  * Compute drift model from sync markers and/or time sync metadata.
  * Delegates to strategy helpers based on available markers.
+ * @param inWaterMarkers
+ * @param surfaceMarkers
+ * @param syncMetadata
  */
 function computeDriftModel(
   inWaterMarkers: ParsedSensorData['markers'],
@@ -526,7 +702,12 @@ function computeDriftModel(
 }
 
 // * Log the drift model decision
-function logDriftModel(driftModel: ComputedDriftModel | null, syncMetadata: SyncMetadata): void {
+/**
+ *
+ * @param driftModel
+ * @param _syncMetadata
+ */
+function logDriftModel(driftModel: ComputedDriftModel | null, _syncMetadata: SyncMetadata): void {
   if (!driftModel) {
     console.log(`[QSensor Fusion] Warning: No time sync data available, timestamps will not be corrected`)
     return
@@ -536,17 +717,20 @@ function logDriftModel(driftModel: ComputedDriftModel | null, syncMetadata: Sync
     console.log(`[QSensor Fusion] Using constant offset model: ${driftModel.startOffsetMs.toFixed(1)}ms`)
   } else {
     const driftRateMsPerMin = (driftModel.driftRatePerMs ?? 0) * 60000
-    const endOffset = driftModel.endOffsetMs !== undefined
-      ? driftModel.endOffsetMs.toFixed(1)
-      : '?'
+    const endOffset = driftModel.endOffsetMs !== undefined ? driftModel.endOffsetMs.toFixed(1) : '?'
     console.log(
       `[QSensor Fusion] Using linear drift model: start=${driftModel.startOffsetMs.toFixed(1)}ms, ` +
-      `end=${endOffset}ms, drift=${driftRateMsPerMin.toFixed(3)}ms/min`
+        `end=${endOffset}ms, drift=${driftRateMsPerMin.toFixed(3)}ms/min`
     )
   }
 }
 
 // * Correct a timestamp using the drift model
+/**
+ *
+ * @param inWaterTime
+ * @param driftModel
+ */
 function correctTimestamp(inWaterTime: number, driftModel: ComputedDriftModel | null): number {
   if (!driftModel) {
     return inWaterTime
@@ -567,6 +751,13 @@ function correctTimestamp(inWaterTime: number, driftModel: ComputedDriftModel | 
 }
 
 // * Update sync_metadata.json with sync markers and drift model info
+/**
+ *
+ * @param sessionRoot
+ * @param inWaterMarkers
+ * @param surfaceMarkers
+ * @param driftModel
+ */
 async function updateSyncMetadataWithDriftInfo(
   sessionRoot: string,
   inWaterMarkers: ParsedSensorData['markers'],
@@ -630,7 +821,9 @@ async function updateSyncMetadataWithDriftInfo(
 /**
  * Build a consolidated timestamp axis by clustering nearby timestamps.
  * This reduces redundant axis points that previously drove single-sensor rows.
- *
+ * @param inWaterRows
+ * @param surfaceRows
+ * @param driftModel
  * @param consolidationThresholdMs - 25ms default collapses timestamp clusters within
  *   sensor sampling granularity (typical Q-Sensor sample rate ~40-100ms between readings).
  *   Prevents creating redundant axis points from slight timing variations.
@@ -639,9 +832,18 @@ function buildConsolidatedTimestampAxis(
   inWaterRows: CsvRow[],
   surfaceRows: CsvRow[],
   driftModel: ComputedDriftModel | null,
-  consolidationThresholdMs: number = 25
+  consolidationThresholdMs = 25
 ): number[] {
-  type TimestampEntry = { time: number; source: string }
+  type TimestampEntry = {
+    /**
+     *
+     */
+    time: number
+    /**
+     *
+     */
+    source: string
+  }
 
   const allTimestamps: TimestampEntry[] = []
 
@@ -681,7 +883,24 @@ function buildConsolidatedTimestampAxis(
 }
 
 // * Pick a representative timestamp for a cluster: prefer surface reading, otherwise median.
-function computeRepresentativeTimestamp(cluster: Array<{ time: number; source: string }>): number {
+/**
+ *
+ * @param cluster
+ */
+function computeRepresentativeTimestamp(
+  cluster: Array<{
+    /**
+fffffffffffffffffffffffffffffffffffffffffffffffffffffffff *
+fffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+     */
+    time: number
+    /**
+tttttttttttttt *
+tttttttttttttt
+     */
+    source: string
+  }>
+): number {
   const surfaceCandidate = cluster.find((item) => item.source === 'surface')
   if (surfaceCandidate) {
     return surfaceCandidate.time
@@ -693,10 +912,12 @@ function computeRepresentativeTimestamp(cluster: Array<{ time: number; source: s
 }
 
 // * Build a row map with drift correction applied to timestamps.
-function buildRowMapWithDrift(
-  rows: CsvRow[],
-  driftModel: ComputedDriftModel | null
-): Map<number, CsvRow> {
+/**
+ *
+ * @param rows
+ * @param driftModel
+ */
+function buildRowMapWithDrift(rows: CsvRow[], driftModel: ComputedDriftModel | null): Map<number, CsvRow> {
   const map = new Map<number, CsvRow>()
   for (const row of rows) {
     const correctedTime = correctTimestamp(row._parsedTime, driftModel)
@@ -706,7 +927,12 @@ function buildRowMapWithDrift(
 }
 
 // * Build a Map from timestamp (ms) to CsvRow for fast lookup.
-function buildRowMap(rows: CsvRow[], offsetMs: number = 0): Map<number, CsvRow> {
+/**
+ *
+ * @param rows
+ * @param offsetMs
+ */
+function buildRowMap(rows: CsvRow[], offsetMs = 0): Map<number, CsvRow> {
   const map = new Map<number, CsvRow>()
   for (const row of rows) {
     const adjustedTime = row._parsedTime - offsetMs
@@ -717,6 +943,13 @@ function buildRowMap(rows: CsvRow[], offsetMs: number = 0): Map<number, CsvRow> 
 
 // * Find the nearest reading within tolerance.
 // * Returns the row if found within toleranceMs, otherwise null.
+/**
+ *
+ * @param targetTime
+ * @param rowsMap
+ * @param toleranceMs
+ * @param usedReadings
+ */
 function findNearestReading(
   targetTime: number,
   rowsMap: Map<number, CsvRow>,
@@ -757,6 +990,13 @@ function findNearestReading(
 }
 
 // * Create wide-format rows from timestamp axis and sensor maps.
+/**
+ *
+ * @param timestampAxis
+ * @param inWaterMap
+ * @param surfaceMap
+ * @param toleranceMs
+ */
 function createWideFormatRows(
   timestampAxis: number[],
   inWaterMap: Map<number, CsvRow>,
@@ -819,6 +1059,16 @@ function createWideFormatRows(
   return wideRows
 }
 
+/**
+ *
+ * @param timestamp
+ * @param inWaterRow
+ * @param surfaceRow
+ * @param lastInWaterTime
+ * @param lastSurfaceTime
+ * @param lastRowHadBothSensors
+ * @param toleranceMs
+ */
 function evaluateRowCreation(
   timestamp: number,
   inWaterRow: CsvRow | null,
@@ -849,6 +1099,11 @@ function evaluateRowCreation(
 }
 
 // * Write wide-format unified CSV file with atomic write pattern.
+/**
+ *
+ * @param outputPath
+ * @param rows
+ */
 async function writeWideFormatCsv(outputPath: string, rows: WideFormatRow[]): Promise<void> {
   const tmpPath = outputPath + '.tmp'
 
@@ -882,6 +1137,10 @@ async function writeWideFormatCsv(outputPath: string, rows: WideFormatRow[]): Pr
 // ============================================================================
 
 // * Check if file exists.
+/**
+ *
+ * @param filePath
+ */
 async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath)
@@ -892,14 +1151,19 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 // * Check if both sensors have completed recording and produced session.csv files.
+/**
+ *
+ * @param syncMetadata
+ */
 export function areBothSensorsComplete(syncMetadata: SyncMetadata): boolean {
-  return !!(
-    syncMetadata.sensors.inWater?.sessionCsv &&
-    syncMetadata.sensors.surface?.sessionCsv
-  )
+  return !!(syncMetadata.sensors.inWater?.sessionCsv && syncMetadata.sensors.surface?.sessionCsv)
 }
 
 // * Check if fusion has already been performed for this session by looking for unified_session.csv.
+/**
+ *
+ * @param sessionRoot
+ */
 export async function isFusionComplete(sessionRoot: string): Promise<boolean> {
   const unifiedPath = path.join(sessionRoot, UNIFIED_CSV_FILENAME)
   return fileExists(unifiedPath)

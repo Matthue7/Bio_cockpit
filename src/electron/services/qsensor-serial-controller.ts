@@ -11,50 +11,49 @@
 
 import EventEmitter from 'events'
 import { performance } from 'perf_hooks'
+
 import { SerialLink } from './link/serial'
 import {
+  AVERAGING_MAX,
+  AVERAGING_MIN,
+  DELAY_POST_OPEN,
+  DELAY_POST_RESET,
+  // Constants
+  ESC,
+  INPUT_TERMINATOR,
+  InvalidFrameError,
+  makePolledInitCmd,
+  makePolledQueryCmd,
+  MENU_CMD_AVERAGING,
+  MENU_CMD_CONFIG_DUMP,
+  MENU_CMD_EXIT,
+  MENU_CMD_MODE,
+  MENU_CMD_RATE,
+  MENU_REDISPLAY_DELAY,
+  QSeriesData,
+  QSeriesMode,
   QSeriesProtocolParser,
   QSeriesReading,
   QSeriesSensorConfig,
-  QSeriesMode,
-  QSeriesData,
-  InvalidFrameError,
-  ProtocolError,
-  // Constants
-  ESC,
-  MENU_CMD_AVERAGING,
-  MENU_CMD_RATE,
-  MENU_CMD_MODE,
-  MENU_CMD_CONFIG_DUMP,
-  MENU_CMD_EXIT,
-  RE_MENU_PROMPT,
   RE_AVERAGING_SET,
-  RE_AVERAGING_PROMPT,
-  RE_RATE_SET,
-  RE_RATE_PROMPT,
-  RE_MODE_PROMPT,
-  RE_TAG_PROMPT,
-  RE_ERROR_INVALID_AVERAGING,
-  RE_ERROR_INVALID_RATE,
   RE_ERROR_BAD_TAG,
-  DELAY_POST_OPEN,
-  DELAY_POST_RESET,
+  RE_MENU_PROMPT,
+  RE_MODE_PROMPT,
+  RE_RATE_PROMPT,
+  RE_RATE_SET,
+  RE_TAG_PROMPT,
   TIMEOUT_MENU_PROMPT,
-  TIMEOUT_READ_LINE,
-  MENU_REDISPLAY_DELAY,
-  INPUT_TERMINATOR,
   VALID_ADC_RATES,
-  AVERAGING_MIN,
-  AVERAGING_MAX,
   VALID_TAGS,
-  makePolledInitCmd,
-  makePolledQueryCmd,
 } from './qsensor-protocol'
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
+/**
+ *
+ */
 export enum ConnectionState {
   DISCONNECTED = 'disconnected',
   CONFIG_MENU = 'config_menu',
@@ -63,17 +62,47 @@ export enum ConnectionState {
   PAUSED = 'paused',
 }
 
+/**
+ *
+ */
 export interface SerialControllerConfig {
+  /**
+   *
+   */
   port: string
+  /**
+   *
+   */
   baudRate: number
 }
 
+/**
+ *
+ */
 export interface HealthData {
+  /**
+   *
+   */
   sensor_id: string
+  /**
+   *
+   */
   state: ConnectionState
+  /**
+   *
+   */
   tempC?: number
+  /**
+   *
+   */
   vin?: number
+  /**
+   *
+   */
   buffer_size: number
+  /**
+   *
+   */
   last_reading_age_ms?: number
 }
 
@@ -81,21 +110,42 @@ export interface HealthData {
 // Custom Errors
 // ============================================================================
 
+/**
+ *
+ */
 export class SerialIOError extends Error {
+  /**
+   *
+   * @param message
+   */
   constructor(message: string) {
     super(message)
     this.name = 'SerialIOError'
   }
 }
 
+/**
+ *
+ */
 export class MenuTimeoutError extends Error {
+  /**
+   *
+   * @param message
+   */
   constructor(message: string) {
     super(message)
     this.name = 'MenuTimeoutError'
   }
 }
 
+/**
+ *
+ */
 export class InvalidConfigValueError extends Error {
+  /**
+   *
+   * @param message
+   */
   constructor(message: string) {
     super(message)
     this.name = 'InvalidConfigValueError'
@@ -110,36 +160,51 @@ export class InvalidConfigValueError extends Error {
 // * Orchestrates connection, configuration, acquisition, buffering, and event emission.
 // * EVENT EMISSION: 'reading', 'error', 'state-change'.
 // ! THREAD SAFETY: Not thread-safe; call from main Electron thread only.
+/**
+ *
+ */
 export class QSeriesSerialController extends EventEmitter {
   private link: SerialLink | null = null
   private parser: QSeriesProtocolParser
   private state: ConnectionState = ConnectionState.DISCONNECTED
   private config: QSeriesSensorConfig | null = null
-  private sensorId: string = 'unknown'
+  private sensorId = 'unknown'
 
   // Connection parameters for reconnection
   private lastPort: string | null = null
-  private lastBaud: number = 9600
+  private lastBaud = 9600
 
   // Acquisition state
   private acquisitionInterval: NodeJS.Timeout | null = null
   private lastPolledTag: string | null = null
-  private lastPollHz: number = 1.0
+  private lastPollHz = 1.0
 
   // Reading tracking
   private lastReadingTimestamp: number | null = null
   private lineBuffer: string[] = []
 
+  /**
+   *
+   */
   constructor() {
     super()
     this.parser = new QSeriesProtocolParser()
   }
 
   // Allow tests to override scheduling behavior
+  /**
+   *
+   * @param callback
+   * @param periodMs
+   */
   protected scheduleInterval(callback: () => void, periodMs: number): NodeJS.Timeout {
     return setInterval(callback, periodMs)
   }
 
+  /**
+   *
+   * @param handle
+   */
   protected clearScheduledInterval(handle: NodeJS.Timeout): void {
     clearInterval(handle)
   }
@@ -149,6 +214,11 @@ export class QSeriesSerialController extends EventEmitter {
   // ========================================================================
 
   // * Create a serial link instance (protected for test mocking).
+  /**
+   *
+   * @param port
+   * @param baudRate
+   */
   protected createSerialLink(port: string, baudRate: number): SerialLink {
     const uri = new URL(`serial:${port}?baudrate=${baudRate}`)
     return new SerialLink(uri)
@@ -159,7 +229,12 @@ export class QSeriesSerialController extends EventEmitter {
   // ========================================================================
 
   // * Connect to sensor and enter configuration menu (forces ESC, waits for menu prompt, reads config snapshot).
-  async connect(port: string, baudRate: number = 9600): Promise<void> {
+  /**
+   *
+   * @param port
+   * @param baudRate
+   */
+  async connect(port: string, baudRate = 9600): Promise<void> {
     console.log(`[QSeriesSerial] connect() called - port: ${port}, baudRate: ${baudRate}, currentState: ${this.state}`)
 
     if (this.state !== ConnectionState.DISCONNECTED) {
@@ -226,6 +301,9 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Disconnect from sensor and clean up resources (stop acquisition, close port, reset state).
+  /**
+   *
+   */
   async disconnect(): Promise<void> {
     if (this.state === ConnectionState.DISCONNECTED) {
       return
@@ -252,6 +330,9 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Reconnect to sensor using last known port/baud.
+  /**
+   *
+   */
   async reconnect(): Promise<void> {
     if (!this.lastPort) {
       throw new SerialIOError('Cannot reconnect: no previous connection')
@@ -271,6 +352,9 @@ export class QSeriesSerialController extends EventEmitter {
   // ========================================================================
 
   // * Get current sensor configuration (requires CONFIG_MENU state).
+  /**
+   *
+   */
   getConfig(): QSeriesSensorConfig {
     if (this.state !== ConnectionState.CONFIG_MENU) {
       throw new SerialIOError(`Cannot get config in state ${this.state}. Must be in CONFIG_MENU.`)
@@ -284,6 +368,10 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Set number of readings to average (1-65535) while in CONFIG_MENU.
+  /**
+   *
+   * @param n
+   */
   async setAveraging(n: number): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -305,11 +393,7 @@ export class QSeriesSerialController extends EventEmitter {
     await this.writeCommand(String(n))
 
     // Wait for confirmation
-    const confirmed = await this.waitForPattern(
-      RE_AVERAGING_SET,
-      10000,
-      (match) => parseInt(match[1], 10) === n
-    )
+    const confirmed = await this.waitForPattern(RE_AVERAGING_SET, 10000, (match) => parseInt(match[1], 10) === n)
 
     if (!confirmed) {
       throw new MenuTimeoutError('Averaging not confirmed by device')
@@ -328,6 +412,10 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Set ADC sample rate (valid: 4, 8, 16, 33, 62, 125, 250, 500 Hz) while in CONFIG_MENU.
+  /**
+   *
+   * @param rateHz
+   */
   async setAdcRate(rateHz: number): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -373,6 +461,11 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Set operating mode (freerun or polled). Polled requires a single uppercase tag.
+  /**
+   *
+   * @param mode
+   * @param tag
+   */
   async setMode(mode: QSeriesMode, tag: string | null = null): Promise<QSeriesSensorConfig> {
     this.ensureInMenu()
 
@@ -435,7 +528,11 @@ export class QSeriesSerialController extends EventEmitter {
   // ========================================================================
 
   // * Exit menu and start data acquisition in configured mode (freerun or polled).
-  async startAcquisition(pollHz: number = 1.0): Promise<void> {
+  /**
+   *
+   * @param pollHz
+   */
+  async startAcquisition(pollHz = 1.0): Promise<void> {
     this.ensureInMenu()
 
     if (!this.config) {
@@ -471,6 +568,9 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Pause acquisition and enter menu (stops loops, sends ESC).
+  /**
+   *
+   */
   async pause(): Promise<void> {
     if (this.state !== ConnectionState.ACQ_FREERUN && this.state !== ConnectionState.ACQ_POLLED) {
       throw new SerialIOError(`Cannot pause from state ${this.state}. Must be acquiring.`)
@@ -490,6 +590,9 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Resume acquisition from paused state.
+  /**
+   *
+   */
   async resume(): Promise<void> {
     if (this.state !== ConnectionState.PAUSED) {
       throw new SerialIOError(`Cannot resume from state ${this.state}. Must be PAUSED.`)
@@ -506,6 +609,9 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Stop acquisition and return to CONFIG_MENU state.
+  /**
+   *
+   */
   async stop(): Promise<void> {
     if (
       this.state !== ConnectionState.ACQ_FREERUN &&
@@ -533,6 +639,9 @@ export class QSeriesSerialController extends EventEmitter {
   // ========================================================================
 
   // * Get current health/status data.
+  /**
+   *
+   */
   getHealth(): HealthData {
     const lastReadingAge = this.lastReadingTimestamp ? Date.now() - this.lastReadingTimestamp : undefined
 
@@ -545,16 +654,25 @@ export class QSeriesSerialController extends EventEmitter {
   }
 
   // * Check if controller is connected to sensor.
+  /**
+   *
+   */
   isConnected(): boolean {
     return this.link !== null && this.link.isOpen && this.state !== ConnectionState.DISCONNECTED
   }
 
   // * Get current connection state.
+  /**
+   *
+   */
   getState(): ConnectionState {
     return this.state
   }
 
   // * Get sensor ID.
+  /**
+   *
+   */
   getSensorId(): string {
     return this.sensorId
   }
@@ -563,12 +681,18 @@ export class QSeriesSerialController extends EventEmitter {
   // Internal Helpers: Menu Operations
   // ========================================================================
 
+  /**
+   *
+   */
   private ensureInMenu(): void {
     if (this.state !== ConnectionState.CONFIG_MENU) {
       throw new SerialIOError(`Operation requires CONFIG_MENU state, current: ${this.state}`)
     }
   }
 
+  /**
+   *
+   */
   private async enterMenu(): Promise<void> {
     if (!this.link) {
       throw new SerialIOError('Not connected')
@@ -592,10 +716,19 @@ export class QSeriesSerialController extends EventEmitter {
     console.log('[QSeriesSerial] Entered config menu')
   }
 
+  /**
+   *
+   * @param timeout
+   */
   private async waitForMenuPrompt(timeout: number = TIMEOUT_MENU_PROMPT): Promise<boolean> {
     return this.waitForPrompt(RE_MENU_PROMPT, timeout)
   }
 
+  /**
+   *
+   * @param pattern
+   * @param timeout
+   */
   private async waitForPrompt(pattern: RegExp, timeout: number): Promise<boolean> {
     const startTime = Date.now()
 
@@ -615,6 +748,12 @@ export class QSeriesSerialController extends EventEmitter {
     return false
   }
 
+  /**
+   *
+   * @param pattern
+   * @param timeout
+   * @param validator
+   */
   private async waitForPattern(
     pattern: RegExp,
     timeout: number,
@@ -639,6 +778,9 @@ export class QSeriesSerialController extends EventEmitter {
     return false
   }
 
+  /**
+   *
+   */
   private async readConfigSnapshot(): Promise<QSeriesSensorConfig> {
     if (!this.link) {
       throw new SerialIOError('Not connected')
@@ -684,12 +826,20 @@ export class QSeriesSerialController extends EventEmitter {
   // Internal Helpers: Acquisition Loops
   // ========================================================================
 
+  /**
+   *
+   */
   private startFreerunLoop(): void {
     // Freerun mode: data arrives via serial data event handler
     // No active polling needed, just parse incoming lines
     console.log('[QSeriesSerial] Freerun reader loop started (event-driven)')
   }
 
+  /**
+   *
+   * @param tag
+   * @param pollHz
+   */
   private async startPolledLoop(tag: string, pollHz: number): Promise<void> {
     if (!this.link) {
       throw new SerialIOError('Not connected')
@@ -724,6 +874,9 @@ export class QSeriesSerialController extends EventEmitter {
     console.log(`[QSeriesSerial] Started polled reader loop at ${pollHz} Hz`)
   }
 
+  /**
+   *
+   */
   private stopAcquisitionLoop(): void {
     if (this.acquisitionInterval) {
       this.clearScheduledInterval(this.acquisitionInterval)
@@ -736,6 +889,10 @@ export class QSeriesSerialController extends EventEmitter {
   // Internal Helpers: Serial I/O
   // ========================================================================
 
+  /**
+   *
+   * @param cmd
+   */
   private async writeCommand(cmd: string): Promise<void> {
     if (!this.link) {
       throw new SerialIOError('Not connected')
@@ -745,6 +902,10 @@ export class QSeriesSerialController extends EventEmitter {
     await this.link.write(data)
   }
 
+  /**
+   *
+   * @param data
+   */
   private async writeBytes(data: Buffer): Promise<void> {
     if (!this.link) {
       throw new SerialIOError('Not connected')
@@ -753,6 +914,10 @@ export class QSeriesSerialController extends EventEmitter {
     await this.link.write(data)
   }
 
+  /**
+   *
+   * @param data
+   */
   private handleSerialData(data: Buffer): void {
     // Feed data to parser
     const lines = this.parser.feed(data)
@@ -773,6 +938,10 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
+  /**
+   *
+   * @param lines
+   */
   private processFreerunLines(lines: string[]): void {
     for (const line of lines) {
       // Filter out menu/banner/diagnostic lines
@@ -816,6 +985,10 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
+  /**
+   *
+   * @param lines
+   */
   private processPolledLines(lines: string[]): void {
     if (!this.lastPolledTag) {
       return
@@ -836,6 +1009,11 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
+  /**
+   *
+   * @param data
+   * @param mode
+   */
   private createReading(data: QSeriesData, mode: QSeriesMode): QSeriesReading {
     return {
       timestamp_utc: new Date().toISOString(),
@@ -848,22 +1026,37 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
+  /**
+   *
+   * @param reading
+   */
   private emitReading(reading: QSeriesReading): void {
     this.lastReadingTimestamp = Date.now()
     this.emit('reading', reading)
   }
 
+  /**
+   *
+   * @param error
+   */
   private handleSerialError(error: Error): void {
     console.error('[QSeriesSerial] Serial error:', error)
     this.emit('error', error)
     this.cleanupAfterUnexpectedDisconnect()
   }
 
+  /**
+   *
+   */
   private handleSerialClose(): void {
     console.warn('[QSeriesSerial] Serial port closed unexpectedly')
     this.cleanupAfterUnexpectedDisconnect(new SerialIOError('Serial port closed unexpectedly'))
   }
 
+  /**
+   *
+   * @param error
+   */
   private cleanupAfterUnexpectedDisconnect(error?: Error): void {
     this.stopAcquisitionLoop()
     if (this.link) {
@@ -877,10 +1070,17 @@ export class QSeriesSerialController extends EventEmitter {
     }
   }
 
+  /**
+   *
+   */
   private emitStateChange(): void {
     this.emit('state-change', this.state)
   }
 
+  /**
+   *
+   * @param ms
+   */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }

@@ -7,8 +7,9 @@
  * - Error handling and rollback
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { setActivePinia, createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { useQSensorStore } from '../src/stores/qsensor'
 
 // ============================================================================
@@ -39,7 +40,13 @@ const mockElectronAPI = {
 
 // Install mock on window
 declare global {
+  /**
+   *
+   */
   interface Window {
+    /**
+     *
+     */
     electronAPI: typeof mockElectronAPI
   }
 }
@@ -48,6 +55,9 @@ declare global {
 // Test Utilities
 // ============================================================================
 
+/**
+ *
+ */
 function setupAllMocks() {
   // Shared mocks
   mockElectronAPI.getQSensorStoragePath.mockResolvedValue('/tmp/qsensor-test')
@@ -100,7 +110,6 @@ function setupAllMocks() {
   })
 }
 
-
 // ============================================================================
 // Tests
 // ============================================================================
@@ -124,9 +133,15 @@ describe('QSensor Store', () => {
     // Mark sensors as connected (required for recording operations)
     store.inWaterSensor.isConnected = true
     store.inWaterSensor.apiBaseUrl = 'http://localhost:9150'
+    store.inWaterSensor.connectionMode = 'api'
+    store.inWaterSensor.connectionModeExplicitlySet = true
+    store.inWaterSensor.backendType = 'http'
     store.surfaceSensor.isConnected = true
     store.surfaceSensor.serialPort = '/dev/ttyUSB1'
     store.surfaceSensor.baudRate = 9600
+    store.surfaceSensor.connectionMode = 'serial'
+    store.surfaceSensor.connectionModeExplicitlySet = true
+    store.surfaceSensor.backendType = 'serial'
   })
 
   afterEach(() => {
@@ -165,7 +180,10 @@ describe('QSensor Store', () => {
       })
 
       expect(result.success).toBe(false)
-      expect(result.errors).toContain('In-water: HTTP connection failed')
+      // Error format includes full context: "In-water: inWater sensor acquisition failed (...): HTTP connection failed"
+      expect(result.errors.length).toBeGreaterThan(0)
+      expect(result.errors[0]).toContain('In-water')
+      expect(result.errors[0]).toContain('HTTP connection failed')
       expect(store.unifiedSessionId).toBeNull()
       expect(store.unifiedSessionPath).toBeNull()
 

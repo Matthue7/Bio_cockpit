@@ -41,6 +41,9 @@ const storagePath = ref<string>('')
 const error = ref<string | null>(null)
 
 // * Load configured storage path from Electron store
+/**
+ *
+ */
 async function loadStoragePath() {
   try {
     const path = await window.electronAPI.getQSensorStoragePath()
@@ -51,6 +54,9 @@ async function loadStoragePath() {
 }
 
 // * Browse for a new storage directory and persist the selection
+/**
+ *
+ */
 async function handleBrowse() {
   try {
     error.value = null

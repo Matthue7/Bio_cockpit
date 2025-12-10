@@ -2,44 +2,97 @@
 // * Continuously mirrors chunked Q-Sensor data from ROV to topside during recording.
 // * Uses timer-based polling to check for new chunks and downloads them atomically.
 
+import * as crypto from 'crypto'
 import { app, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
-import * as crypto from 'crypto'
 import { v4 as uuidv4 } from 'uuid'
+
 import store from './config-store'
+import { areBothSensorsComplete, fuseSessionData, isFusionComplete } from './qsensor-fusion'
 import {
   buildSensorDirectoryName,
   buildUnifiedSessionRoot,
   ensureSyncMetadata,
   getSyncMetadataPath,
   readSyncMetadata,
-  updateSensorMetadata,
   updateFusionStatus,
+  updateSensorMetadata,
 } from './qsensor-session-utils'
-import { fuseSessionData, areBothSensorsComplete, isFusionComplete } from './qsensor-fusion'
 import { validateAndNormalizeQSensorUrl } from './url-validator'
 
+/**
+ *
+ */
 interface MirrorSession {
+  /**
+   *
+   */
   sessionId: string
+  /**
+   *
+   */
   apiBaseUrl: string
+  /**
+   *
+   */
   missionName: string
+  /**
+   *
+   */
   cadenceSec: number
+  /**
+   *
+   */
   fullBandwidth: boolean
+  /**
+   *
+   */
   rootPath: string
+  /**
+   *
+   */
   sessionRoot?: string
+  /**
+   *
+   */
   lastChunkIndex: number
+  /**
+   *
+   */
   bytesMirrored: number
+  /**
+   *
+   */
   lastSync: string | null
+  /**
+   *
+   */
   intervalId: NodeJS.Timeout | null
+  /**
+   *
+   */
   running: boolean
+  /**
+   *
+   */
   syncId: string | null
 }
 
 const activeSessions = new Map<string, MirrorSession>()
 
 // * Inject a sync marker into the Pi recording via /record/sync-marker.
-async function injectPiSyncMarker(session: MirrorSession, syncId: string, markerType: 'START' | 'STOP'): Promise<boolean> {
+/**
+ *
+ * @param session
+ * @param syncId
+ * @param markerType
+ */
+async function injectPiSyncMarker(
+  session: MirrorSession,
+  syncId: string,
+  markerType: 'START' | 'STOP'
+): Promise<boolean> {
   const syncUrl = `${session.apiBaseUrl}/record/sync-marker`
 
   try {
@@ -63,7 +116,9 @@ async function injectPiSyncMarker(session: MirrorSession, syncId: string, marker
 
     const result = await response.json().catch(() => null)
     console.log(
-      `[QSensor Mirror] ${markerType} marker injected (syncId=${syncId.slice(0, 8)}..., ts=${result?.timestamp ?? 'unknown'})`
+      `[QSensor Mirror] ${markerType} marker injected (syncId=${syncId.slice(0, 8)}..., ts=${
+        result?.timestamp ?? 'unknown'
+      })`
     )
     return true
   } catch (error: any) {
@@ -77,6 +132,10 @@ async function injectPiSyncMarker(session: MirrorSession, syncId: string, marker
 // * Attempt to fuse both sensor session.csv files into unified output.
 // * Called after a sensor finishes combine/cleanup to prevent missing dual-sensor fusion.
 // * Skips if fusion already ran or both sensors are not yet complete.
+/**
+ *
+ * @param sessionRoot
+ */
 async function attemptFusion(sessionRoot: string): Promise<void> {
   try {
     // NOTE: Avoid double-fusing
@@ -161,12 +220,20 @@ async function attemptFusion(sessionRoot: string): Promise<void> {
 }
 
 // * Compute SHA256 hash of a file.
+/**
+ *
+ * @param filePath
+ */
 async function computeSHA256(filePath: string): Promise<string> {
   const buffer = await fs.readFile(filePath)
   return crypto.createHash('sha256').update(buffer).digest('hex')
 }
 
 // * Write mirror.json metadata atomically.
+/**
+ *
+ * @param session
+ */
 async function writeMirrorMetadata(session: MirrorSession): Promise<void> {
   const mirrorPath = path.join(session.rootPath, 'mirror.json')
   const mirrorTmp = path.join(session.rootPath, 'mirror.json.tmp')
@@ -186,7 +253,22 @@ async function writeMirrorMetadata(session: MirrorSession): Promise<void> {
 }
 
 // * Load mirror.json metadata if it exists.
-async function loadMirrorMetadata(rootPath: string): Promise<{ lastChunkIndex: number; bytesMirrored: number } | null> {
+/**
+ *
+ * @param rootPath
+ */
+async function loadMirrorMetadata(rootPath: string): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  lastChunkIndex: number
+  /**
+llllllllllllllllllllllll *
+llllllllllllllllllllllll
+   */
+  bytesMirrored: number
+} | null> {
   const mirrorPath = path.join(rootPath, 'mirror.json')
 
   try {
@@ -203,13 +285,28 @@ async function loadMirrorMetadata(rootPath: string): Promise<{ lastChunkIndex: n
 }
 
 // * Download a single chunk with atomic write and SHA256 verification.
+/**
+ *
+ * @param apiBaseUrl
+ * @param sessionId
+ * @param chunkName
+ * @param expectedSha256
+ * @param targetDir
+ */
 async function downloadChunk(
   apiBaseUrl: string,
   sessionId: string,
   chunkName: string,
   expectedSha256: string,
   targetDir: string
-): Promise<{ success: boolean; bytes: number; error?: string }> {
+): Promise<{
+  /** Whether the download succeeded */
+  success: boolean
+  /** Number of bytes downloaded */
+  bytes: number
+  /** Error message if download failed */
+  error?: string
+}> {
   const url = `${apiBaseUrl}/files/${sessionId}/${chunkName}`
   const targetPath = path.join(targetDir, chunkName)
   const tmpPath = path.join(targetDir, `${chunkName}.tmp`)
@@ -235,7 +332,12 @@ async function downloadChunk(
     // ! Verify SHA256 before moving file into session directory
     const actualSha256 = await computeSHA256(tmpPath)
     if (actualSha256 !== expectedSha256) {
-      console.error(`[QSensor Mirror] SHA256 mismatch: expected=${expectedSha256.substring(0, 8)}..., actual=${actualSha256.substring(0, 8)}...`)
+      console.error(
+        `[QSensor Mirror] SHA256 mismatch: expected=${expectedSha256.substring(
+          0,
+          8
+        )}..., actual=${actualSha256.substring(0, 8)}...`
+      )
       await fs.unlink(tmpPath) // NOTE: Clean up temp file on mismatch
       return { success: false, bytes: 0, error: 'SHA256 mismatch' }
     }
@@ -259,6 +361,10 @@ async function downloadChunk(
 }
 
 // * Poll for new chunks and mirror them.
+/**
+ *
+ * @param session
+ */
 async function pollAndMirror(session: MirrorSession): Promise<void> {
   if (!session.running) {
     console.log(`[QSensor Mirror] pollAndMirror() skipped: session ${session.sessionId} not running`)
@@ -295,7 +401,11 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 
     // * Download each new chunk
     for (const chunk of newChunks) {
-      console.log(`[QSensor Mirror] Attempting to download chunk ${chunk.index}: ${chunk.name} (${chunk.size_bytes} bytes, sha256=${chunk.sha256?.substring(0, 8)}...)`)
+      console.log(
+        `[QSensor Mirror] Attempting to download chunk ${chunk.index}: ${chunk.name} (${
+          chunk.size_bytes
+        } bytes, sha256=${chunk.sha256?.substring(0, 8)}...)`
+      )
 
       const result = await downloadChunk(
         session.apiBaseUrl,
@@ -310,7 +420,9 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
         session.bytesMirrored += result.bytes
         session.lastSync = new Date().toISOString()
 
-        console.log(`[QSensor Mirror] ✓ Downloaded chunk ${chunk.name}: ${result.bytes} bytes (total mirrored: ${session.bytesMirrored})`)
+        console.log(
+          `[QSensor Mirror] ✓ Downloaded chunk ${chunk.name}: ${result.bytes} bytes (total mirrored: ${session.bytesMirrored})`
+        )
       } else {
         console.error(`[QSensor Mirror] ✗ Failed to download ${chunk.name}: ${result.error}`)
         // NOTE: Continue with other chunks; mirror will retry on next poll
@@ -318,7 +430,9 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
     }
 
     // * Update metadata after completing downloads
-    console.log(`[QSensor Mirror] Writing mirror.json: lastChunk=${session.lastChunkIndex}, bytes=${session.bytesMirrored}`)
+    console.log(
+      `[QSensor Mirror] Writing mirror.json: lastChunk=${session.lastChunkIndex}, bytes=${session.bytesMirrored}`
+    )
     await writeMirrorMetadata(session)
     console.log(`[QSensor Mirror] Poll complete for session ${session.sessionId}`)
   } catch (error: any) {
@@ -332,6 +446,16 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
 
 // * Start mirroring session.
 // * Uses unified session layout when provided to align in-water data with topside recordings.
+/**
+ *
+ * @param sessionId
+ * @param apiBaseUrl
+ * @param missionName
+ * @param cadenceSec
+ * @param fullBandwidth
+ * @param unifiedSessionTimestamp
+ * @param syncId
+ */
 export async function startMirrorSession(
   sessionId: string,
   apiBaseUrl: string,
@@ -340,9 +464,38 @@ export async function startMirrorSession(
   fullBandwidth: boolean,
   unifiedSessionTimestamp?: string,
   syncId?: string
-): Promise<{ success: boolean; error?: string; data?: { sessionRoot: string }; syncId?: string }> {
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  error?: string
+  /**
+eeeeeeeeeeeeeeee *
+eeeeeeeeeeeeeeee
+   */
+  data?: {
+    /**
+ddddddddd *
+ddddddddd
+     */
+    sessionRoot: string
+  }
+  /**
+sssssssssssssssssssssss *
+sssssssssssssssssssssss
+   */
+  syncId?: string
+}> {
   try {
-    console.log(`[QSensor Mirror] startMirrorSession() called: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`)
+    console.log(
+      `[QSensor Mirror] startMirrorSession() called: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`
+    )
 
     // PHASE 3: Validate and normalize URL before starting mirror session
     const urlResult = validateAndNormalizeQSensorUrl(apiBaseUrl, `session ${sessionId}`)
@@ -375,7 +528,11 @@ export async function startMirrorSession(
       rootPath = path.join(basePath, missionName, sessionId)
     }
 
-    console.log(`[QSensor Mirror] Storage path resolved: customPath=${customStoragePath || 'none'}, basePath=${basePath}, rootPath=${rootPath}`)
+    console.log(
+      `[QSensor Mirror] Storage path resolved: customPath=${
+        customStoragePath || 'none'
+      }, basePath=${basePath}, rootPath=${rootPath}`
+    )
 
     const sessionSyncId = syncId || uuidv4()
 
@@ -396,7 +553,11 @@ export async function startMirrorSession(
 
     // NOTE: Load existing metadata if resuming
     const existing = await loadMirrorMetadata(rootPath)
-    console.log(`[QSensor Mirror] Loaded metadata: lastChunk=${existing?.lastChunkIndex ?? -1}, bytes=${existing?.bytesMirrored ?? 0}`)
+    console.log(
+      `[QSensor Mirror] Loaded metadata: lastChunk=${existing?.lastChunkIndex ?? -1}, bytes=${
+        existing?.bytesMirrored ?? 0
+      }`
+    )
 
     const session: MirrorSession = {
       sessionId,
@@ -426,7 +587,9 @@ export async function startMirrorSession(
 
     // * Start polling - wrap in try-catch to catch any immediate errors
     try {
-      const poll = () => pollAndMirror(session)
+      const poll = (): void => {
+        pollAndMirror(session)
+      }
       console.log(`[QSensor Mirror] Running initial poll...`)
       poll() // Run immediately
       session.intervalId = setInterval(poll, session.cadenceSec * 1000)
@@ -436,9 +599,7 @@ export async function startMirrorSession(
       throw pollError
     }
 
-    console.log(
-      `[QSensor Mirror] Started session ${sessionId}: cadence=${session.cadenceSec}s, path=${rootPath}`
-    )
+    console.log(`[QSensor Mirror] Started session ${sessionId}: cadence=${session.cadenceSec}s, path=${rootPath}`)
 
     return {
       success: true,
@@ -455,7 +616,31 @@ export async function startMirrorSession(
 
 // * Verify session.csv file integrity after combining.
 // * Confirms row counts and header presence before chunk cleanup.
-async function verifySessionFile(sessionCsvPath: string, expectedRows: number): Promise<{ valid: boolean; actualRows: number; error?: string }> {
+/**
+ *
+ * @param sessionCsvPath
+ * @param expectedRows
+ */
+async function verifySessionFile(
+  sessionCsvPath: string,
+  expectedRows: number
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  valid: boolean
+  /**
+vvvvvvvvvvvvvvvv *
+vvvvvvvvvvvvvvvv
+   */
+  actualRows: number
+  /**
+aaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaa
+   */
+  error?: string
+}> {
   try {
     console.log(`[QSensor Mirror] Verifying ${sessionCsvPath}...`)
 
@@ -500,13 +685,12 @@ async function verifySessionFile(sessionCsvPath: string, expectedRows: number): 
       return {
         valid: false,
         actualRows,
-        error: `Row count mismatch: expected ${expectedRows}, got ${actualRows}`
+        error: `Row count mismatch: expected ${expectedRows}, got ${actualRows}`,
       }
     }
 
     console.log(`[QSensor Mirror] ✓ Session file verified successfully`)
     return { valid: true, actualRows }
-
   } catch (error: any) {
     console.error(`[QSensor Mirror] Verification failed:`, error)
     return { valid: false, actualRows: 0, error: error.message }
@@ -515,7 +699,22 @@ async function verifySessionFile(sessionCsvPath: string, expectedRows: number): 
 
 // * Clean up redundant chunk files after successful session.csv creation.
 // ! Only delete chunks after successful verification; mirror.json and session.csv are preserved.
-async function cleanupChunkFiles(session: MirrorSession): Promise<{ deleted: number; errors: number }> {
+/**
+ *
+ * @param session
+ */
+async function cleanupChunkFiles(session: MirrorSession): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  deleted: number
+  /**
+ddddddddddddddddd *
+ddddddddddddddddd
+   */
+  errors: number
+}> {
   let deleted = 0
   let errors = 0
 
@@ -523,9 +722,7 @@ async function cleanupChunkFiles(session: MirrorSession): Promise<{ deleted: num
     console.log(`[QSensor Mirror] Cleaning up chunk files in ${session.rootPath}...`)
 
     const files = await fs.readdir(session.rootPath)
-    const chunkFiles = files
-      .filter(name => name.match(/^chunk_\d{5}\.csv$/))
-      .sort()
+    const chunkFiles = files.filter((name) => name.match(/^chunk_\d{5}\.csv$/)).sort()
 
     console.log(`[QSensor Mirror] Found ${chunkFiles.length} chunk files to clean up`)
 
@@ -544,7 +741,6 @@ async function cleanupChunkFiles(session: MirrorSession): Promise<{ deleted: num
 
     console.log(`[QSensor Mirror] Cleanup complete: deleted=${deleted}, errors=${errors}`)
     return { deleted, errors }
-
   } catch (error: any) {
     console.error(`[QSensor Mirror] Cleanup failed:`, error)
     return { deleted, errors: errors + 1 }
@@ -553,7 +749,27 @@ async function cleanupChunkFiles(session: MirrorSession): Promise<{ deleted: num
 
 // * Combine all chunk CSV files into a single continuous session.csv file.
 // * Reads chunks in order, writes header once, and streams rows to limit memory.
-async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{ success: boolean; rowsWritten: number; error?: string }> {
+/**
+ *
+ * @param session
+ */
+async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  rowsWritten: number
+  /**
+rrrrrrrrrrrrrrrrrrrrr *
+rrrrrrrrrrrrrrrrrrrrr
+   */
+  error?: string
+}> {
   const sessionCsvPath = path.join(session.rootPath, 'session.csv')
   const sessionCsvTmpPath = path.join(session.rootPath, 'session.csv.tmp')
 
@@ -562,9 +778,7 @@ async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{ s
 
     // * Get list of all chunk files in directory
     const files = await fs.readdir(session.rootPath)
-    const chunkFiles = files
-      .filter(name => name.match(/^chunk_\d{5}\.csv$/))
-      .sort() // Sort by name ensures correct order (chunk_00000, chunk_00001, ...)
+    const chunkFiles = files.filter((name) => name.match(/^chunk_\d{5}\.csv$/)).sort() // Sort by name ensures correct order (chunk_00000, chunk_00001, ...)
 
     if (chunkFiles.length === 0) {
       console.warn(`[QSensor Mirror] No chunk files found in ${session.rootPath}`)
@@ -643,9 +857,22 @@ async function combineChunksIntoSessionFile(session: MirrorSession): Promise<{ s
 
 // * Stop mirroring session.
 // ! Call after backend /record/stop so the final chunk is finalized and downloadable.
-export async function stopMirrorSession(
-  sessionId: string
-): Promise<{ success: boolean; error?: string }> {
+/**
+ *
+ * @param sessionId
+ */
+export async function stopMirrorSession(sessionId: string): Promise<{
+  /**
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee *
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  error?: string
+}> {
   const session = activeSessions.get(sessionId)
 
   if (!session) {
@@ -678,7 +905,7 @@ export async function stopMirrorSession(
 
     // ! Wait briefly for backend /record/stop to finalize the last chunk (flush, checksum, manifest)
     console.log(`[QSensor Mirror] Waiting 1s for backend to finalize last chunk...`)
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise((resolve) => setTimeout(resolve, 1000))
 
     // * Final poll to catch the last finalized chunk
     console.log(`[QSensor Mirror] Running final poll to catch last chunk...`)
@@ -718,7 +945,9 @@ export async function stopMirrorSession(
     // * Clean up redundant chunk files after successful verification
     console.log(`[QSensor Mirror] Cleaning up redundant chunk files...`)
     const cleanupResult = await cleanupChunkFiles(session)
-    console.log(`[QSensor Mirror] Cleanup result: deleted ${cleanupResult.deleted} chunks, ${cleanupResult.errors} errors`)
+    console.log(
+      `[QSensor Mirror] Cleanup result: deleted ${cleanupResult.deleted} chunks, ${cleanupResult.errors} errors`
+    )
 
     if (cleanupResult.errors > 0) {
       console.warn(`[QSensor Mirror] ⚠ Some chunk files could not be deleted (${cleanupResult.errors} errors)`)
@@ -729,7 +958,7 @@ export async function stopMirrorSession(
     await writeMirrorMetadata(session)
 
     if (session.sessionRoot) {
-      const sessionCsvPath = path.join(session.rootPath, 'session.csv')
+      // sessionCsvPath already declared above at line 937
       const relativeCsv = path.relative(session.sessionRoot, sessionCsvPath)
       await updateSensorMetadata(session.sessionRoot, 'inWater', {
         stoppedAt: new Date().toISOString(),
@@ -747,18 +976,33 @@ export async function stopMirrorSession(
 
     return { success: true }
   } catch (error: any) {
-    console.error(
-      `[QSensor Mirror] Stop failed for ${session.apiBaseUrl} (session ${sessionId}):`,
-      error
-    )
+    console.error(`[QSensor Mirror] Stop failed for ${session.apiBaseUrl} (session ${sessionId}):`, error)
     return { success: false, error: error.message }
   }
 }
 
 // * Get session statistics.
-export function getSessionStats(
-  sessionId: string
-): { success: boolean; stats?: any; error?: string } {
+/**
+ *
+ * @param sessionId
+ */
+export function getSessionStats(sessionId: string): {
+  /**
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee *
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  stats?: any
+  /**
+sssssssssssss *
+sssssssssssss
+   */
+  error?: string
+} {
   const session = activeSessions.get(sessionId)
 
   if (!session) {
@@ -779,16 +1023,36 @@ export function getSessionStats(
 }
 
 // * Setup IPC handlers for Q-Sensor mirroring.
+/**
+ *
+ */
 export function setupQSensorMirrorService(): void {
   ipcMain.handle(
     'qsensor:start-mirror',
-    async (_event, sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp?, syncId?) => {
+    async (
+      _event,
+      sessionId,
+      apiBaseUrl,
+      missionName,
+      cadenceSec,
+      fullBandwidth,
+      unifiedSessionTimestamp?,
+      syncId?
+    ) => {
       console.log(
         `[QSensor Mirror] IPC start request: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, cadence=${
           fullBandwidth ? 2 : cadenceSec
         }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}, syncId=${syncId ?? 'auto'}`
       )
-      return await startMirrorSession(sessionId, apiBaseUrl, missionName, cadenceSec, fullBandwidth, unifiedSessionTimestamp, syncId)
+      return await startMirrorSession(
+        sessionId,
+        apiBaseUrl,
+        missionName,
+        cadenceSec,
+        fullBandwidth,
+        unifiedSessionTimestamp,
+        syncId
+      )
     }
   )
 

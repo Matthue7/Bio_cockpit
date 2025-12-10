@@ -43,6 +43,9 @@ import type { QSensorState } from '@/types/qsensor'
 
 const props = defineProps<{
   // * Sensor state feeding the stats display
+  /**
+   *
+   */
   sensor: QSensorState
 }>()
 
@@ -54,7 +57,7 @@ const bytesLabel = computed(() => {
 
 // * Duration tracking for active session timer
 const now = ref(Date.now())
-let durationInterval: NodeJS.Timeout | null = null
+let durationInterval: ReturnType<typeof setInterval> | null = null
 
 const formattedDuration = computed(() => {
   if (!props.sensor.currentSession) return '0:00'
@@ -85,6 +88,10 @@ onUnmounted(() => {
 })
 
 // * Human-readable byte formatter for mirrored/recorded totals
+/**
+ *
+ * @param bytes
+ */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -93,6 +100,10 @@ function formatBytes(bytes: number): string {
 }
 
 // * Format ISO timestamp into local time for sync display
+/**
+ *
+ * @param iso
+ */
 function formatTimestamp(iso: string): string {
   const date = new Date(iso)
   return date.toLocaleTimeString()

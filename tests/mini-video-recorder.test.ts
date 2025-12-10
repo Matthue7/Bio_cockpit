@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { reactive, ref } from 'vue'
+
 import type { MiniWidget } from '@/types/widgets'
 
 const emptyComponent = { render: () => null }
@@ -60,7 +61,16 @@ vi.mock('@/stores/video', () => ({
   useVideoStore: () => videoStoreMock,
 }))
 
-const widgetStates: Record<string, { configMenuOpen: boolean }> = {}
+const widgetStates: Record<
+  string,
+  {
+    /**
+ccccccccccccccccccccccccccccccccccccc *
+ccccccccccccccccccccccccccccccccccccc
+     */
+    configMenuOpen: boolean
+  }
+> = {}
 
 vi.mock('@/stores/widgetManager', () => ({
   useWidgetManagerStore: () => ({
@@ -105,11 +115,15 @@ const stubs = {
   'v-divider': {
     template: '<div><slot /></slot></div>',
   },
-  FontAwesomeIcon: {
+  'FontAwesomeIcon': {
     template: '<span><slot /></span>',
   },
 }
 
+/**
+ *
+ * @param overrides
+ */
 function createMiniWidget(overrides: Partial<MiniWidget> = {}): MiniWidget {
   return {
     hash: 'widget-1',
@@ -131,6 +145,10 @@ describe('MiniVideoRecorder.vue', () => {
     isRecordingMock.mockImplementation(() => isRecordingFlag)
   })
 
+  /**
+   *
+   * @param props
+   */
   async function mountRecorder(props = {}) {
     const wrapper = mount(MiniVideoRecorder, {
       props: {

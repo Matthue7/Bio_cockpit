@@ -5,37 +5,51 @@
  * and acquisition logic using mocked serial communication.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import {
-  QSeriesSerialController,
-  ConnectionState,
-  SerialIOError,
-  MenuTimeoutError,
-  InvalidConfigValueError,
-} from '../src/electron/services/qsensor-serial-controller'
-import { QSeriesReading } from '../src/electron/services/qsensor-protocol'
 import EventEmitter from 'events'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { QSeriesReading } from '../src/electron/services/qsensor-protocol'
+import {
+  ConnectionState,
+  InvalidConfigValueError,
+  MenuTimeoutError,
+  QSeriesSerialController,
+  SerialIOError,
+} from '../src/electron/services/qsensor-serial-controller'
 
 // ============================================================================
 // Mock Serial Link
 // ============================================================================
 
+/**
+ *
+ */
 class MockSerialLink extends EventEmitter {
   isOpen = false
   private writeCallback?: (data: Buffer) => void
   private readBuffer: Buffer[] = []
 
+  /**
+   *
+   */
   async open(): Promise<void> {
     this.isOpen = true
     console.log('[MockSerial] Port opened')
   }
 
+  /**
+   *
+   */
   async close(): Promise<void> {
     this.isOpen = false
     this.removeAllListeners()
     console.log('[MockSerial] Port closed')
   }
 
+  /**
+   *
+   * @param data
+   */
   async write(data: Buffer): Promise<void> {
     if (!this.isOpen) {
       throw new Error('Port not open')
@@ -48,21 +62,36 @@ class MockSerialLink extends EventEmitter {
   }
 
   // Test helper: set callback for write operations
+  /**
+   *
+   * @param callback
+   */
   onWrite(callback: (data: Buffer) => void): void {
     this.writeCallback = callback
   }
 
   // Test helper: simulate incoming data
+  /**
+   *
+   * @param data
+   */
   simulateData(data: string): void {
     this.emit('data', Buffer.from(data, 'ascii'))
   }
 
   // Test helper: simulate error
+  /**
+   *
+   * @param error
+   */
   simulateError(error: Error): void {
     this.emit('error', error)
   }
 
   // Test helper: simulate close
+  /**
+   *
+   */
   simulateClose(): void {
     this.isOpen = false
     this.emit('close')
@@ -73,18 +102,35 @@ class MockSerialLink extends EventEmitter {
 // Test Utilities
 // ============================================================================
 
+/**
+ *
+ */
 function createMockLink(): MockSerialLink {
   return new MockSerialLink()
 }
 
+/**
+ *
+ * @param callback
+ */
 function deferResponse(callback: () => void): void {
   queueMicrotask(callback)
 }
 
+/**
+ *
+ */
 async function flushAsync(): Promise<void> {
   await Promise.resolve()
 }
 
+/**
+ *
+ * @param controller
+ * @param mockLink
+ * @param configLine
+ * @param extraHandler
+ */
 function setupMenuMocks(
   controller: QSeriesSerialController,
   mockLink: MockSerialLink,
@@ -136,6 +182,8 @@ describe('QSeriesSerialController', () => {
 
   /**
    * Helper to connect the controller and allow any queued microtasks to flush.
+   * @param port
+   * @param baudRate
    */
   async function connectController(port = '/dev/ttyUSB0', baudRate = 9600): Promise<void> {
     await controller.connect(port, baudRate)
@@ -394,11 +442,13 @@ describe('QSeriesSerialController', () => {
       const intervalCallbacks: Array<() => Promise<void> | void> = []
       let scheduledPeriod = 0
 
-      vi.spyOn(controller as any, 'scheduleInterval').mockImplementation((callback: () => void | Promise<void>, period: number) => {
-        scheduledPeriod = period
-        intervalCallbacks.push(callback)
-        return { id: intervalCallbacks.length } as unknown as NodeJS.Timeout
-      })
+      vi.spyOn(controller as any, 'scheduleInterval').mockImplementation(
+        (callback: () => void | Promise<void>, period: number) => {
+          scheduledPeriod = period
+          intervalCallbacks.push(callback)
+          return { id: intervalCallbacks.length } as unknown as NodeJS.Timeout
+        }
+      )
       vi.spyOn(controller as any, 'clearScheduledInterval').mockImplementation(() => {})
 
       mockLink.onWrite((data) => {

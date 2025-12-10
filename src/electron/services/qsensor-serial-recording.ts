@@ -7,16 +7,16 @@
 
 console.log('[QSensor Serial Recording] Module loading...')
 
-import { ipcMain, app } from 'electron'
+import { app, ipcMain } from 'electron'
 console.log('[QSensor Serial Recording] Imported ipcMain, app')
 
 import * as path from 'path'
 console.log('[QSensor Serial Recording] Imported path')
 
-import { QSeriesSerialController, ConnectionState } from './qsensor-serial-controller'
+import { ConnectionState, QSeriesSerialController } from './qsensor-serial-controller'
 console.log('[QSensor Serial Recording] Imported QSeriesSerialController')
 
-import { QSeriesLocalRecorder, StartRecordingParams, RecordingStats } from './qsensor-local-recorder'
+import { QSeriesLocalRecorder } from './qsensor-local-recorder'
 console.log('[QSensor Serial Recording] Imported QSeriesLocalRecorder')
 
 import { QSeriesReading } from './qsensor-protocol'
@@ -46,10 +46,25 @@ let activeSyncId: string | null = null
 let readingListenerAttached = false
 
 // Cache for final session stats (preserved after recording stops)
+/**
+ *
+ */
 interface LastSessionStats {
+  /**
+   *
+   */
   sessionId: string
+  /**
+   *
+   */
   totalRows: number
+  /**
+   *
+   */
   bytesFlushed: number
+  /**
+   *
+   */
   stoppedAt: string
 }
 let lastSessionStats: LastSessionStats | null = null
@@ -99,8 +114,29 @@ function ensureRecording(): void {
 
 /**
  * Connect to surface sensor via serial
+ * @param port
+ * @param baudRate
  */
-async function connect(port: string, baudRate: number = 9600): Promise<{ success: boolean; data?: any; error?: string }> {
+async function connect(
+  port: string,
+  baudRate = 9600
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   console.log(`[QSensor Serial] connect() called - port: ${port}, baudRate: ${baudRate}`)
   console.log(`[QSensor Serial] serialController exists: ${!!serialController}`)
   console.log(`[QSensor Serial] serialController.connect exists: ${typeof serialController?.connect}`)
@@ -137,7 +173,23 @@ async function connect(port: string, baudRate: number = 9600): Promise<{ success
 /**
  * Disconnect from surface sensor
  */
-async function disconnect(): Promise<{ success: boolean; data?: any; error?: string }> {
+async function disconnect(): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     // Stop recording if active
     if (activeSessionId) {
@@ -159,7 +211,23 @@ async function disconnect(): Promise<{ success: boolean; data?: any; error?: str
  * Get serial controller health.
  * Normalizes snake_case from controller to camelCase for TypeScript consumers.
  */
-async function getHealth(): Promise<{ success: boolean; data?: any; error?: string }> {
+async function getHealth(): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     const health = serialController.getHealth()
     const config = serialController.getConfig()
@@ -195,8 +263,25 @@ async function getHealth(): Promise<{ success: boolean; data?: any; error?: stri
 
 /**
  * Start acquisition (without recording)
+ * @param pollHz
  */
-async function startAcquisition(pollHz: number = 1.0): Promise<{ success: boolean; data?: any; error?: string }> {
+async function startAcquisition(pollHz = 1.0): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     ensureConnected()
 
@@ -220,7 +305,23 @@ async function startAcquisition(pollHz: number = 1.0): Promise<{ success: boolea
 /**
  * Stop acquisition
  */
-async function stopAcquisition(): Promise<{ success: boolean; data?: any; error?: string }> {
+async function stopAcquisition(): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     await serialController.stop()
 
@@ -239,15 +340,56 @@ async function stopAcquisition(): Promise<{ success: boolean; data?: any; error?
 
 /**
  * Start local recording for surface sensor
+ * @param params
+ * @param params.mission
+ * @param params.rollIntervalS
+ * @param params.rateHz
+ * @param params.storagePath
+ * @param params.unifiedSessionTimestamp
+ * @param params.syncId
  */
 async function startRecording(params: {
+  /**
+   *
+   */
   mission: string
+  /**
+   *
+   */
   rollIntervalS?: number
+  /**
+   *
+   */
   rateHz?: number
+  /**
+   *
+   */
   storagePath?: string
+  /**
+   *
+   */
   unifiedSessionTimestamp?: string
+  /**
+   *
+   */
   syncId?: string
-}): Promise<{ success: boolean; data?: any; error?: string }> {
+}): Promise<{
+  /**
+}}}}}}}}}}}}}} *
+}}}}}}}}}}}}}}
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     ensureConnected()
     ensureNotRecording()
@@ -319,7 +461,23 @@ async function startRecording(params: {
 /**
  * Stop local recording for surface sensor
  */
-async function stopRecording(): Promise<{ success: boolean; data?: any; error?: string }> {
+async function stopRecording(): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     ensureRecording()
 
@@ -369,7 +527,23 @@ async function stopRecording(): Promise<{ success: boolean; data?: any; error?: 
 /**
  * Get recording statistics
  */
-async function getRecordingStats(): Promise<{ success: boolean; data?: any; error?: string }> {
+async function getRecordingStats(): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     if (!activeSessionId) {
       // Not actively recording - return cached stats from last session if available
@@ -513,16 +687,37 @@ export function setupQSensorSerialRecordingService(): void {
 
     // Recording operations
     console.log('[QSensor Serial Recording] Registering handler: qsensor-serial:start-recording')
-    ipcMain.handle('qsensor-serial:start-recording', async (_event, params: {
-      mission: string
-      rollIntervalS?: number
-      rateHz?: number
-      storagePath?: string
-      unifiedSessionTimestamp?: string
-    }) => {
-      console.log('[QSensor Serial] IPC handler invoked: qsensor-serial:start-recording', JSON.stringify(params))
-      return await startRecording(params)
-    })
+    ipcMain.handle(
+      'qsensor-serial:start-recording',
+      async (
+        _event,
+        params: {
+          /**
+           *
+           */
+          mission: string
+          /**
+           *
+           */
+          rollIntervalS?: number
+          /**
+           *
+           */
+          rateHz?: number
+          /**
+           *
+           */
+          storagePath?: string
+          /**
+           *
+           */
+          unifiedSessionTimestamp?: string
+        }
+      ) => {
+        console.log('[QSensor Serial] IPC handler invoked: qsensor-serial:start-recording', JSON.stringify(params))
+        return await startRecording(params)
+      }
+    )
     console.log('[QSensor Serial Recording] Registered handler: qsensor-serial:start-recording')
 
     console.log('[QSensor Serial Recording] Registering handler: qsensor-serial:stop-recording')

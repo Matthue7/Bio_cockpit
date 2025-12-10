@@ -36,10 +36,13 @@ module.exports = {
       },
     ],
     'jsdoc/require-param-description': 0,
+    'jsdoc/require-param-type': 0, // TypeScript provides types
+    'jsdoc/require-returns-type': 0, // TypeScript provides return types
     'jsdoc/require-returns-description': 0,
     'jsdoc/newline-after-description': 'off',
     'jsdoc/no-undefined-types': 'off',
-    'jsdoc/require-returns': ['error', { forceReturnsWithAsync: false }],
+    // TypeScript provides return types, so JSDoc @returns is optional
+    'jsdoc/require-returns': 'off',
     'max-len': ['error', { code: 180, ignoreUrls: true, ignoreComments: true }],
     'no-alert': 'off',
     'no-console': 'off',
@@ -77,8 +80,17 @@ module.exports = {
     '@typescript-eslint/no-non-null-assertion': 'off',
     '@typescript-eslint/no-useless-constructor': ['error'],
     '@typescript-eslint/no-shadow': ['error'],
-    '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],
+    '@typescript-eslint/explicit-function-return-type': [
+      'error',
+      {
+        allowExpressions: true,
+        allowTypedFunctionExpressions: true,
+        allowHigherOrderFunctions: true,
+        allowDirectConstAssertionInArrowFunctions: true,
+      },
+    ],
     '@typescript-eslint/no-explicit-any': 'off',
+    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     'vue/no-unused-properties': [
       'error',
       {
@@ -115,6 +127,22 @@ module.exports = {
       files: ['*.vue'],
       rules: {
         'max-len': ['off'],
+        // Vue SFCs with <script setup> benefit from TypeScript inference
+        '@typescript-eslint/explicit-function-return-type': 'off',
+      },
+    },
+    {
+      // Relax documentation requirements for test files
+      files: ['tests/**/*.ts', '**/*.test.ts', 'src/tests/**/*.ts'],
+      rules: {
+        'jsdoc/require-jsdoc': 'off',
+        'jsdoc/require-returns': 'off',
+        'jsdoc/require-param': 'off',
+        'jsdoc/require-param-type': 'off',
+        '@typescript-eslint/explicit-function-return-type': 'off',
+        '@typescript-eslint/no-empty-function': 'off',
+        '@typescript-eslint/no-unused-vars': 'off', // Test files may have unused imports for setup
+        '@typescript-eslint/no-useless-constructor': 'off',
       },
     },
   ],

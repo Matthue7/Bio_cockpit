@@ -54,12 +54,20 @@ export const POLLED_INIT_CMD = 'Q'
 export const POLLED_INIT_PADDING = '000'
 export const POLLED_INIT_TERM = '!'
 
+/**
+ *
+ * @param tag
+ */
 export function makePolledInitCmd(tag: string): string {
   return `${POLLED_INIT_PREFIX}${tag}${POLLED_INIT_CMD}${POLLED_INIT_PADDING}${POLLED_INIT_TERM}`
 }
 
 export const POLLED_QUERY_PREFIX = '>'
 
+/**
+ *
+ * @param tag
+ */
 export function makePolledQueryCmd(tag: string): string {
   return `${POLLED_QUERY_PREFIX}${tag}*`
 }
@@ -128,7 +136,7 @@ export const RE_ERROR_BAD_TAG = /Bad TAG/i
  * Group 3: optional temp
  * Group 4: optional vin
  */
-export const RE_FREERUN_LINE = /^([^\d\-]*?)([\-\d.]+)(?:,\s*([\-\d.]+))?(?:,\s*([\-\d.]+))?\s*$/
+export const RE_FREERUN_LINE = /^([^\d-]*?)([-\d.]+)(?:,\s*([-\d.]+))?(?:,\s*([-\d.]+))?\s*$/
 
 /**
  * Polled data line: <TAG>,<preamble><value>[, <temp>][, <vin>] CRLF
@@ -139,7 +147,7 @@ export const RE_FREERUN_LINE = /^([^\d\-]*?)([\-\d.]+)(?:,\s*([\-\d.]+))?(?:,\s*
  * Group 4: optional temp
  * Group 5: optional vin
  */
-export const RE_POLLED_LINE = /^([A-Z]),([^\d\-]*?)([\-\d.]+)(?:,\s*([\-\d.]+))?(?:,\s*([\-\d.]+))?\s*$/
+export const RE_POLLED_LINE = /^([A-Z]),([^\d-]*?)([-\d.]+)(?:,\s*([-\d.]+))?(?:,\s*([-\d.]+))?\s*$/
 
 /**
  * Configuration CSV dump from "^" command
@@ -167,8 +175,17 @@ export type QSeriesMode = 'freerun' | 'polled'
  * Parsed sensor data from a single frame
  */
 export interface QSeriesData {
+  /**
+   *
+   */
   value: number
+  /**
+   *
+   */
   TempC?: number
+  /**
+   *
+   */
   Vin?: number
 }
 
@@ -176,12 +193,33 @@ export interface QSeriesData {
  * Timestamped reading with metadata
  */
 export interface QSeriesReading {
+  /**
+   *
+   */
   timestamp_utc: string // ISO 8601 wall clock
+  /**
+   *
+   */
   timestamp_monotonic_ns: bigint // Monotonic clock (performance.now() * 1e6)
+  /**
+   *
+   */
   sensor_id: string
+  /**
+   *
+   */
   mode: QSeriesMode
+  /**
+   *
+   */
   value: number
+  /**
+   *
+   */
   TempC?: number
+  /**
+   *
+   */
   Vin?: number
 }
 
@@ -189,15 +227,45 @@ export interface QSeriesReading {
  * Sensor configuration
  */
 export interface QSeriesSensorConfig {
+  /**
+   *
+   */
   averaging: number
+  /**
+   *
+   */
   adc_rate_hz: number
+  /**
+   *
+   */
   mode: QSeriesMode
+  /**
+   *
+   */
   tag: string | null
+  /**
+   *
+   */
   include_temp: boolean
+  /**
+   *
+   */
   include_vin: boolean
+  /**
+   *
+   */
   preamble: string
+  /**
+   *
+   */
   calfactor: number
+  /**
+   *
+   */
   serial_number: string
+  /**
+   *
+   */
   firmware_version: string
 }
 
@@ -205,7 +273,13 @@ export interface QSeriesSensorConfig {
  * Frame parsing result
  */
 export interface ParsedFrame {
+  /**
+   *
+   */
   data: QSeriesData
+  /**
+   *
+   */
   raw: string
 }
 
@@ -213,14 +287,28 @@ export interface ParsedFrame {
 // Custom Errors
 // ============================================================================
 
+/**
+ *
+ */
 export class InvalidFrameError extends Error {
+  /**
+   *
+   * @param message
+   */
   constructor(message: string) {
     super(message)
     this.name = 'InvalidFrameError'
   }
 }
 
+/**
+ *
+ */
 export class ProtocolError extends Error {
+  /**
+   *
+   * @param message
+   */
   constructor(message: string) {
     super(message)
     this.name = 'ProtocolError'
@@ -244,12 +332,11 @@ export class ProtocolError extends Error {
  * in q_sensor_lib/parsing.py. Any changes should maintain semantic equivalence.
  */
 export class QSeriesProtocolParser {
-  private buffer: string = ''
+  private buffer = ''
   private readonly maxBufferSize: number = 4096
 
   /**
    * Feed raw bytes from serial port into the parser.
-   *
    * @param data - Raw buffer from serial port
    * @returns Array of complete lines ready for parsing (CRLF stripped)
    */
@@ -260,6 +347,7 @@ export class QSeriesProtocolParser {
     const lines: string[] = []
 
     // Extract complete lines (terminated by CRLF)
+    // eslint-disable-next-line no-constant-condition -- intentional infinite loop with break
     while (true) {
       const endIdx = this.buffer.indexOf(OUTPUT_TERMINATOR)
       if (endIdx === -1) {
@@ -290,7 +378,6 @@ export class QSeriesProtocolParser {
    *
    * Expected format: <preamble><value>[, <temp>][, <vin>]
    * Example: "$LITE123.456789, 21.34, 12.345"
-   *
    * @param line - Complete line from device (CRLF should be stripped by caller)
    * @returns Parsed data object
    * @throws InvalidFrameError if line doesn't match expected pattern
@@ -347,7 +434,6 @@ export class QSeriesProtocolParser {
    *
    * Expected format: <TAG>,<preamble><value>[, <temp>][, <vin>]
    * Example: "A,123.456789, 21.34"
-   *
    * @param line - Complete line from device
    * @param expectedTag - Single uppercase character A-Z to validate against
    * @returns Parsed data object
@@ -411,7 +497,6 @@ export class QSeriesProtocolParser {
    *
    * CSV format (from SendAllParameters):
    * <adcToAverage>,<baudrate>,<CalFactor>,<Description>,E,<Version>,G,H,<Serial>,...
-   *
    * @param line - Raw CSV line from device
    * @returns Parsed sensor configuration
    * @throws InvalidFrameError if CSV doesn't match expected pattern
@@ -425,9 +510,9 @@ export class QSeriesProtocolParser {
 
     try {
       const adcToAverage = parseInt(match[1], 10)
-      const baudrate = parseInt(match[2], 10)
+      const _baudrate = parseInt(match[2], 10) // Parsed but not currently used
       const calFactor = parseFloat(match[3])
-      const description = match[4]
+      const _description = match[4] // Parsed but not currently used
       const firmwareVersion = match[5]
       const serialNumber = match[6]
       const operatingModeChar = match[10] // "0" = freerun, "1" = polled
@@ -468,7 +553,6 @@ export class QSeriesProtocolParser {
 
   /**
    * Extract firmware version from signon banner.
-   *
    * @param bannerText - Multi-line signon banner text
    * @returns Version string (e.g., "4.003") or null if not found
    */
@@ -479,7 +563,6 @@ export class QSeriesProtocolParser {
 
   /**
    * Extract serial number from signon banner.
-   *
    * @param bannerText - Multi-line signon banner text
    * @returns Serial number string or null if not found
    */
@@ -490,7 +573,6 @@ export class QSeriesProtocolParser {
 
   /**
    * Extract operating mode and TAG from signon banner.
-   *
    * @param bannerText - Multi-line signon banner text
    * @returns Tuple of [mode, tag] where mode is "freerun" or "polled" or null
    */

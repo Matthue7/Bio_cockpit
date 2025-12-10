@@ -1,6 +1,6 @@
+import { ipcMain } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { ipcMain } from 'electron'
 
 export type SensorKey = 'inWater' | 'surface'
 
@@ -11,96 +11,289 @@ const SENSOR_DIRECTORY_PREFIX: Record<SensorKey, string> = {
 
 const SYNC_METADATA_FILENAME = 'sync_metadata.json'
 
+/**
+ *
+ */
 export interface SyncMetadataSensorInfo {
+  /**
+   *
+   */
   sessionId?: string
+  /**
+   *
+   */
   directory?: string
+  /**
+   *
+   */
   startedAt?: string
+  /**
+   *
+   */
   stoppedAt?: string
+  /**
+   *
+   */
   sessionCsv?: string
+  /**
+   *
+   */
   bytesMirrored?: number
+  /**
+   *
+   */
   bytesRecorded?: number
 }
 
+/**
+ *
+ */
 export interface FusionStatus {
+  /**
+   *
+   */
   status: 'pending' | 'complete' | 'skipped' | 'failed'
+  /**
+   *
+   */
   unifiedCsv: string | null
+  /**
+   *
+   */
   rowCount: number | null
+  /**
+   *
+   */
   inWaterRows: number | null
+  /**
+   *
+   */
   surfaceRows: number | null
+  /**
+   *
+   */
   completedAt: string | null
+  /**
+   *
+   */
   error: string | null
 }
 
+/**
+ *
+ */
 export interface SyncMarker {
-  syncId: string                    // UUID for marker pairing
+  /**
+   *
+   */
+  syncId: string // UUID for marker pairing
+  /**
+   *
+   */
   type: 'START' | 'STOP'
-  inWaterTimestamp: string | null   // ISO timestamp from in-water sensor
-  surfaceTimestamp: string | null   // ISO timestamp from surface sensor
-  offsetMs: number | null           // Computed offset at this marker
+  /**
+   *
+   */
+  inWaterTimestamp: string | null // ISO timestamp from in-water sensor
+  /**
+   *
+   */
+  surfaceTimestamp: string | null // ISO timestamp from surface sensor
+  /**
+   *
+   */
+  offsetMs: number | null // Computed offset at this marker
+  /**
+   *
+   */
   quality: 'measured' | 'synthetic' // Source quality indicator
 }
 
+/**
+ *
+ */
 export interface DriftModel {
-  type: 'constant' | 'linear'       // Model used for correction
-  startOffsetMs: number             // Offset at session start
-  driftRateMsPerMin?: number        // ms drift per minute (for linear)
-  endOffsetMs?: number              // Offset at session end (for linear)
+  /**
+   *
+   */
+  type: 'constant' | 'linear' // Model used for correction
+  /**
+   *
+   */
+  startOffsetMs: number // Offset at session start
+  /**
+   *
+   */
+  driftRateMsPerMin?: number // ms drift per minute (for linear)
+  /**
+   *
+   */
+  endOffsetMs?: number // Offset at session end (for linear)
 }
 
+/**
+ *
+ */
 export interface SensorTimeSync {
+  /**
+   *
+   */
   method: string
+  /**
+   *
+   */
   offsetMs: number | null
+  /**
+   *
+   */
   uncertaintyMs: number | null
+  /**
+   *
+   */
   measuredAt: string | null
+  /**
+   *
+   */
   error?: string | null
 }
 
+/**
+ *
+ */
 export interface SyncMetadata {
+  /**
+   *
+   */
   schemaVersion: number
+  /**
+   *
+   */
   mission: string
+  /**
+   *
+   */
   unifiedSessionTimestamp: string
+  /**
+   *
+   */
   createdAt: string
+  /**
+   *
+   */
   updatedAt: string
+  /**
+   *
+   */
   sensors: {
+    /**
+     *
+     */
     inWater: SyncMetadataSensorInfo | null
+    /**
+     *
+     */
     surface: SyncMetadataSensorInfo | null
   }
+  /**
+   *
+   */
   timeSync: {
+    /**
+     *
+     */
     inWater: SensorTimeSync | null
+    /**
+     *
+     */
     surface: SensorTimeSync | null
-    markers: SyncMarker[]           // Detected sync markers
-    driftModel: DriftModel | null   // Computed drift correction model
+    /**
+     *
+     */
+    markers: SyncMarker[] // Detected sync markers
+    /**
+     *
+     */
+    driftModel: DriftModel | null // Computed drift correction model
   }
+  /**
+   *
+   */
   fusion?: FusionStatus
 }
 
+/**
+ *
+ * @param basePath
+ * @param mission
+ * @param unifiedTimestamp
+ */
 export function buildUnifiedSessionRoot(basePath: string, mission: string, unifiedTimestamp: string): string {
   return path.join(basePath, mission, `session_${unifiedTimestamp}`)
 }
 
+/**
+ *
+ * @param sensor
+ * @param sessionId
+ */
 export function buildSensorDirectoryName(sensor: SensorKey, sessionId: string): string {
   const prefix = SENSOR_DIRECTORY_PREFIX[sensor]
   return `${prefix}_${sessionId}`
 }
 
+/**
+ *
+ * @param basePath
+ * @param mission
+ * @param unifiedTimestamp
+ * @param sensor
+ * @param sessionId
+ */
 export function resolveUnifiedSensorPath(
   basePath: string,
   mission: string,
   unifiedTimestamp: string,
   sensor: SensorKey,
   sessionId: string
-): { sessionRoot: string; sensorPath: string; sensorDirectoryName: string } {
+): {
+  /**
+))))) *
+)))))
+   */
+  sessionRoot: string
+  /**
+sssssssssssssssssssss *
+sssssssssssssssssssss
+   */
+  sensorPath: string
+  /**
+ssssssssssssssssssss *
+ssssssssssssssssssss
+   */
+  sensorDirectoryName: string
+} {
   const sessionRoot = buildUnifiedSessionRoot(basePath, mission, unifiedTimestamp)
   const sensorDirectoryName = buildSensorDirectoryName(sensor, sessionId)
   const sensorPath = path.join(sessionRoot, sensorDirectoryName)
   return { sessionRoot, sensorPath, sensorDirectoryName }
 }
 
+/**
+ *
+ * @param sessionRoot
+ * @param metadata
+ */
 async function writeSyncMetadataFile(sessionRoot: string, metadata: SyncMetadata): Promise<void> {
   const metadataPath = path.join(sessionRoot, SYNC_METADATA_FILENAME)
   await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
 }
 
+/**
+ *
+ * @param sessionRoot
+ * @param mission
+ * @param unifiedTimestamp
+ */
 export async function ensureSyncMetadata(
   sessionRoot: string,
   mission: string,
@@ -135,6 +328,10 @@ export async function ensureSyncMetadata(
   }
 }
 
+/**
+ *
+ * @param sessionRoot
+ */
 export async function readSyncMetadata(sessionRoot: string): Promise<SyncMetadata | null> {
   const metadataPath = path.join(sessionRoot, SYNC_METADATA_FILENAME)
   try {
@@ -145,6 +342,11 @@ export async function readSyncMetadata(sessionRoot: string): Promise<SyncMetadat
   }
 }
 
+/**
+ *
+ * @param sessionRoot
+ * @param updateFn
+ */
 export async function updateSyncMetadata(
   sessionRoot: string,
   updateFn: (metadata: SyncMetadata) => void
@@ -158,11 +360,28 @@ export async function updateSyncMetadata(
   await writeSyncMetadataFile(sessionRoot, metadata)
 }
 
+/**
+ *
+ * @param sessionRoot
+ * @param sensorId
+ * @param timeSync
+ */
 export async function updateSensorTimeSync(
   sessionRoot: string,
   sensorId: SensorKey,
   timeSync: SensorTimeSync
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  error?: string
+}> {
   try {
     await updateSyncMetadata(sessionRoot, (metadata) => {
       // Ensure timeSync structure exists (backward compat)
@@ -189,6 +408,12 @@ export async function updateSensorTimeSync(
   }
 }
 
+/**
+ *
+ * @param sessionRoot
+ * @param sensor
+ * @param updates
+ */
 export async function updateSensorMetadata(
   sessionRoot: string,
   sensor: SensorKey,
@@ -203,14 +428,20 @@ export async function updateSensorMetadata(
   })
 }
 
+/**
+ *
+ * @param sessionRoot
+ */
 export function getSyncMetadataPath(sessionRoot: string): string {
   return path.join(sessionRoot, SYNC_METADATA_FILENAME)
 }
 
-export async function updateFusionStatus(
-  sessionRoot: string,
-  fusionStatus: FusionStatus
-): Promise<void> {
+/**
+ *
+ * @param sessionRoot
+ * @param fusionStatus
+ */
+export async function updateFusionStatus(sessionRoot: string, fusionStatus: FusionStatus): Promise<void> {
   await updateSyncMetadata(sessionRoot, (metadata) => {
     metadata.fusion = fusionStatus
   })
@@ -218,6 +449,9 @@ export async function updateFusionStatus(
 
 // * Setup IPC handler for updating sync metadata timeSync field.
 // NOTE: Renderer uses this to push measured time sync values after capture.
+/**
+ *
+ */
 export function setupSyncMetadataIPC(): void {
   // @deprecated Phase 3B: global sync is mapped to inWater sensor
   ipcMain.handle(
@@ -226,10 +460,25 @@ export function setupSyncMetadataIPC(): void {
       _event,
       sessionRoot: string,
       timeSync: {
+        /**
+         *
+         */
         method: string
+        /**
+         *
+         */
         offsetMs: number | null
+        /**
+         *
+         */
         uncertaintyMs: number | null
+        /**
+         *
+         */
         measuredAt: string | null
+        /**
+         *
+         */
         error?: string | null
       }
     ) => {

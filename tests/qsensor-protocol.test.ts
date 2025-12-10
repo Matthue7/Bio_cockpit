@@ -8,13 +8,14 @@
  * Python q_sensor_lib test suite.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+
 import {
-  QSeriesProtocolParser,
   InvalidFrameError,
-  OUTPUT_TERMINATOR,
   makePolledInitCmd,
   makePolledQueryCmd,
+  OUTPUT_TERMINATOR,
+  QSeriesProtocolParser,
 } from '../src/electron/services/qsensor-protocol'
 
 describe('QSeriesProtocolParser', () => {
@@ -249,8 +250,7 @@ describe('QSeriesProtocolParser', () => {
   describe('parseConfigCsv() - Configuration Parsing', () => {
     it('should parse valid freerun config CSV', () => {
       // Example from actual device in freerun mode
-      const csv =
-        '12,9600,1.234567,Q-Series Sensor,E,4.003,G,H,SN12345,0.0,0.0,12.34,0,,'
+      const csv = '12,9600,1.234567,Q-Series Sensor,E,4.003,G,H,SN12345,0.0,0.0,12.34,0,,'
 
       const config = parser.parseConfigCsv(csv)
 
@@ -264,8 +264,7 @@ describe('QSeriesProtocolParser', () => {
 
     it('should parse valid polled config CSV', () => {
       // Example from device in polled mode with TAG 'A'
-      const csv =
-        '24,9600,2.345678,Q-Series Polled,E,4.003,G,H,SN67890,0.0,0.0,12.34,1,A,'
+      const csv = '24,9600,2.345678,Q-Series Polled,E,4.003,G,H,SN67890,0.0,0.0,12.34,1,A,'
 
       const config = parser.parseConfigCsv(csv)
 
@@ -402,7 +401,7 @@ Operating in polled mode with tag of A
       expect(data1.Vin).toBeCloseTo(12.345, 3)
 
       const data2 = parser.parseFreerunLine(lines[1])
-      expect(data2.value).toBeCloseTo(123.467890, 6)
+      expect(data2.value).toBeCloseTo(123.46789, 6)
 
       const data3 = parser.parseFreerunLine(lines[2])
       expect(data3.value).toBeCloseTo(123.478901, 6)
@@ -445,8 +444,8 @@ Operating in polled mode with tag of A
 
   describe('Edge Cases and Robustness', () => {
     it('should handle very large values', () => {
-      const data = parser.parseFreerunLine('999999999.123456789')
-      expect(data.value).toBeCloseTo(999999999.123456789, 6)
+      const data = parser.parseFreerunLine('999999999.123456')
+      expect(data.value).toBeCloseTo(999999999.123456, 6)
     })
 
     it('should handle very small values', () => {

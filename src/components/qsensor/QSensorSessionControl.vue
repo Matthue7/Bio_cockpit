@@ -144,11 +144,13 @@
 
       <!-- Row breakdown -->
       <div
-        v-if="store.fusionStatus.status === 'complete' && store.fusionStatus.inWaterRows && store.fusionStatus.surfaceRows"
+        v-if="
+          store.fusionStatus.status === 'complete' && store.fusionStatus.inWaterRows && store.fusionStatus.surfaceRows
+        "
         class="mt-2 text-xs text-gray-400"
       >
-        In-water: {{ store.fusionStatus.inWaterRows.toLocaleString() }} |
-        Surface: {{ store.fusionStatus.surfaceRows.toLocaleString() }}
+        In-water: {{ store.fusionStatus.inWaterRows.toLocaleString() }} | Surface:
+        {{ store.fusionStatus.surfaceRows.toLocaleString() }}
       </div>
 
       <!-- Error message -->
@@ -202,6 +204,9 @@ watch(localMissionName, (newVal) => {
 })
 
 // * Start both sensors with shared mission parameters
+/**
+ *
+ */
 async function handleStartBoth() {
   isStarting.value = true
   lastOperationError.value = null
@@ -223,6 +228,9 @@ async function handleStartBoth() {
 }
 
 // * Stop both sensors and capture any combined errors
+/**
+ *
+ */
 async function handleStopBoth() {
   isStopping.value = true
   lastOperationError.value = null
@@ -252,6 +260,10 @@ async function handleStopBoth() {
 }
 
 // * Format bytes for unified status summary
+/**
+ *
+ * @param bytes
+ */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`

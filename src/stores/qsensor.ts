@@ -6,23 +6,41 @@
  */
 
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
+import { computed, ref } from 'vue'
 
-import { QSensorClient } from '@/libs/qsensor-client'
+import { validateAndNormalizeQSensorUrl } from '@/electron/services/url-validator'
+// Note: QSensorClient was scaffolded for future direct client usage, currently unused
 import { createInitialSensorState, isSensorArmed, isSensorRecording, resetSensorState } from '@/stores/qsensor-common'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
-import { validateAndNormalizeQSensorUrl } from '@/electron/services/url-validator'
 
 /**
  * Serial port information returned from port enumeration
  */
 export interface SerialPortInfo {
+  /**
+   *
+   */
   path: string
+  /**
+   *
+   */
   manufacturer: string | null
+  /**
+   *
+   */
   serialNumber: string | null
+  /**
+   *
+   */
   vendorId: string | null
+  /**
+   *
+   */
   productId: string | null
+  /**
+   *
+   */
   isLikelyQSensor: boolean
 }
 
@@ -66,16 +84,43 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
   // Fusion status (populated after dual-sensor recording stops)
   const fusionStatus = ref<{
+    /**
+     *
+     */
     status: 'pending' | 'complete' | 'skipped' | 'failed' | null
+    /**
+     *
+     */
     unifiedCsv: string | null
+    /**
+     *
+     */
     unifiedCsvPath: string | null
+    /**
+     *
+     */
     rowCount: number | null
+    /**
+     *
+     */
     inWaterRows: number | null
+    /**
+     *
+     */
     surfaceRows: number | null
+    /**
+     *
+     */
     completedAt: string | null
+    /**
+     *
+     */
     error: string | null
   } | null>(null)
 
+  /**
+   *
+   */
   function clearUnifiedSessionState(): void {
     unifiedSessionId.value = null
     unifiedSessionPath.value = null
@@ -129,7 +174,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
    * @param mission
    * @param vehicle
    */
-  function arm(sessionId: string, mission: string, vehicle = 'blueos.local') {
+  function arm(sessionId: string, mission: string, vehicle = 'blueos.local'): void {
     const sensor = inWaterSensor.value
 
     sensor.currentSession = {
@@ -254,7 +299,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
    * Refresh mirroring statistics from Electron.
    * Legacy API - operates on in-water sensor only.
    */
-  async function refreshStatus() {
+  async function refreshStatus(): Promise<void> {
     const sensor = inWaterSensor.value
 
     if (!sensor.currentSession) return
@@ -295,7 +340,13 @@ export const useQSensorStore = defineStore('qsensor', () => {
    * Updates availableSurfacePorts with current system ports.
    */
   async function refreshSurfaceSerialPorts(): Promise<{
+    /**
+     *
+     */
     success: boolean
+    /**
+     *
+     */
     error?: string
   }> {
     try {
@@ -344,7 +395,13 @@ export const useQSensorStore = defineStore('qsensor', () => {
    * @param apiUrl - Full API base URL (e.g., 'http://surfaceref.local:9150')
    */
   async function setSurfaceApiUrl(apiUrl: string): Promise<{
+    /**
+     *
+     */
     success: boolean
+    /**
+     *
+     */
     error?: string
   }> {
     const surface = sensors.value.get('surface')
@@ -421,7 +478,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
 
     // Phase 1: Load persisted surface URL when switching to API mode
     if (sensorId === 'surface' && connectionMode === 'api') {
-      window.electronAPI.getQSensorSurfaceApiUrl()
+      window.electronAPI
+        .getQSensorSurfaceApiUrl()
         .then((savedUrl) => {
           if (savedUrl && sensor) {
             sensor.apiBaseUrl = savedUrl
@@ -514,7 +572,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
           return { success: false, error: urlResult.error }
         }
 
-        console.log(`[QSensor Store] Connecting via HTTP: apiBaseUrl="${urlResult.normalizedUrl}", port="/dev/ttyUSB0", baud=9600`)
+        console.log(
+          `[QSensor Store] Connecting via HTTP: apiBaseUrl="${urlResult.normalizedUrl}", port="/dev/ttyUSB0", baud=9600`
+        )
 
         // Connect via HTTP backend (this establishes serial connection on Pi side)
         result = await window.electronAPI.qsensorConnect(urlResult.normalizedUrl, '/dev/ttyUSB0', 9600)
@@ -659,6 +719,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
    * @param params.rollIntervalS
    * @param params.schemaVersion
    * @param params.unifiedSessionTimestamp
+   * @param params.syncId
    */
   async function startRecordingSensor(
     sensorId: QSensorId,
@@ -722,7 +783,9 @@ export const useQSensorStore = defineStore('qsensor', () => {
     }
 
     // Phase 3: Log recording start attempt
-    console.log(`[QSensor Store] Starting recording for ${sensorId} via ${sensor.connectionMode} (backend: ${sensor.backendType})`)
+    console.log(
+      `[QSensor Store] Starting recording for ${sensorId} via ${sensor.connectionMode} (backend: ${sensor.backendType})`
+    )
 
     try {
       let result: {
@@ -1105,10 +1168,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
             }
 
             // Surface sensor time sync (API mode only)
-            if (
-              surfaceSensor.value.backendType === 'http' &&
-              surfaceSensor.value.apiBaseUrl
-            ) {
+            if (surfaceSensor.value.backendType === 'http' && surfaceSensor.value.apiBaseUrl) {
               try {
                 const urlResult = validateAndNormalizeQSensorUrl(
                   surfaceSensor.value.apiBaseUrl,
@@ -1239,10 +1299,7 @@ export const useQSensorStore = defineStore('qsensor', () => {
         fusionStatus.value = null
       }
     } catch (error: any) {
-      console.warn(
-        `[QSensor Store] Failed to refresh fusion status for ${unifiedSessionPath.value}:`,
-        error
-      )
+      console.warn(`[QSensor Store] Failed to refresh fusion status for ${unifiedSessionPath.value}:`, error)
       fusionStatus.value = null
     }
   }

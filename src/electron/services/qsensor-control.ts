@@ -9,6 +9,9 @@ import { ipcMain } from 'electron'
 
 /**
  * Make a fetch request from Electron main (bypasses CORS)
+ * @param url
+ * @param options
+ * @param corrId
  */
 async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: string): Promise<any> {
   const method = options.method || 'GET'
@@ -30,7 +33,11 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
     // Log request details
     console.log(`${prefix}[PERF] ${method} ${url} - START at t=${startTime}ms`)
     console.log(`${prefix}[DEBUG]   Timeout: ${timeoutMs}ms`)
-    console.log(`${prefix}[DEBUG]   URL parsed: protocol=${new URL(url).protocol}, host=${new URL(url).hostname}:${new URL(url).port}`)
+    console.log(
+      `${prefix}[DEBUG]   URL parsed: protocol=${new URL(url).protocol}, host=${new URL(url).hostname}:${
+        new URL(url).port
+      }`
+    )
     if (options.body) {
       const bodyPreview = typeof options.body === 'string' ? options.body.substring(0, 500) : '[Binary]'
       console.log(`${prefix}[DEBUG]   Body: ${bodyPreview}`)
@@ -68,12 +75,31 @@ async function fetchFromMain(url: string, options: RequestInit = {}, corrId?: st
 
 /**
  * Connect to Q-Sensor via serial port
+ * @param baseUrl
+ * @param port
+ * @param baud
  */
 async function connect(
   baseUrl: string,
   port: string,
   baud: number
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   const fnStart = Date.now()
   console.log(`[QSensor Control][PERF] connect() START at t=${fnStart}ms`)
   console.log(`[QSensor Control][DEBUG] Parameters: baseUrl="${baseUrl}", port="${port}", baud=${baud}`)
@@ -98,7 +124,11 @@ async function connect(
     })
 
     const afterFetch = Date.now()
-    console.log(`[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${afterFetch - fnStart}ms)`)
+    console.log(
+      `[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${
+        afterFetch - fnStart
+      }ms)`
+    )
     console.log('[QSensor Control] Connected:', data)
     return { success: true, data }
   } catch (error: any) {
@@ -112,8 +142,25 @@ async function connect(
 
 /**
  * Disconnect from Q-Sensor
+ * @param baseUrl
  */
-async function disconnect(baseUrl: string): Promise<{ success: boolean; data?: any; error?: string }> {
+async function disconnect(baseUrl: string): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     // Use /disconnect (not /sensor/disconnect) - server has no alias for this endpoint
     const url = new URL('/disconnect', baseUrl)
@@ -133,8 +180,25 @@ async function disconnect(baseUrl: string): Promise<{ success: boolean; data?: a
 
 /**
  * Get instrument health status
+ * @param baseUrl
  */
-async function getHealth(baseUrl: string): Promise<{ success: boolean; data?: any; error?: string }> {
+async function getHealth(baseUrl: string): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     // Robust URL construction - handles trailing slashes correctly
     const url = new URL('/instrument/health', baseUrl)
@@ -154,11 +218,29 @@ async function getHealth(baseUrl: string): Promise<{ success: boolean; data?: an
 
 /**
  * Start sensor acquisition
+ * @param baseUrl
+ * @param pollHz
  */
 async function startAcquisition(
   baseUrl: string,
   pollHz?: number
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   const fnStart = Date.now()
   console.log(`[QSensor Control][PERF] startAcquisition() START at t=${fnStart}ms`)
 
@@ -180,7 +262,11 @@ async function startAcquisition(
     })
 
     const afterFetch = Date.now()
-    console.log(`[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${afterFetch - fnStart}ms)`)
+    console.log(
+      `[QSensor Control][PERF]   fetchFromMain returned after ${afterFetch - beforeFetch}ms (total: ${
+        afterFetch - fnStart
+      }ms)`
+    )
     console.log('[QSensor Control] Acquisition started:', data)
     return { success: true, data }
   } catch (error: any) {
@@ -193,8 +279,25 @@ async function startAcquisition(
 
 /**
  * Stop sensor acquisition
+ * @param baseUrl
  */
-async function stopAcquisition(baseUrl: string): Promise<{ success: boolean; data?: any; error?: string }> {
+async function stopAcquisition(baseUrl: string): Promise<{
+  /**
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     const url = new URL('/sensor/stop', baseUrl)
 
@@ -214,16 +317,50 @@ async function stopAcquisition(baseUrl: string): Promise<{ success: boolean; dat
 
 /**
  * Start recording session
+ * @param baseUrl
+ * @param options
+ * @param options.rate_hz
+ * @param options.schema_version
+ * @param options.mission
+ * @param options.roll_interval_s
  */
 async function startRecording(
   baseUrl: string,
   options: {
+    /**
+     *
+     */
     rate_hz?: number
+    /**
+     *
+     */
     schema_version?: number
+    /**
+     *
+     */
     mission?: string
+    /**
+     *
+     */
     roll_interval_s?: number
   }
-): Promise<{ success: boolean; data?: any; error?: string }> {
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     // Robust URL construction - handles trailing slashes correctly
     const url = new URL('/record/start', baseUrl)
@@ -235,7 +372,9 @@ async function startRecording(
       roll_interval_s: options.roll_interval_s ?? 60,
     }
 
-    console.log(`[QSensor Control] Starting recording: mission="${payload.mission}", rate=${payload.rate_hz}Hz, roll_interval=${payload.roll_interval_s}s`)
+    console.log(
+      `[QSensor Control] Starting recording: mission="${payload.mission}", rate=${payload.rate_hz}Hz, roll_interval=${payload.roll_interval_s}s`
+    )
 
     const data = await fetchFromMain(url.toString(), {
       method: 'POST',
@@ -254,8 +393,29 @@ async function startRecording(
 
 /**
  * Stop recording session
+ * @param baseUrl
+ * @param sessionId
  */
-async function stopRecording(baseUrl: string, sessionId: string): Promise<{ success: boolean; data?: any; error?: string }> {
+async function stopRecording(
+  baseUrl: string,
+  sessionId: string
+): Promise<{
+  /**
+))))))))))))) *
+)))))))))))))
+   */
+  success: boolean
+  /**
+ssssssssssssssssss *
+ssssssssssssssssss
+   */
+  data?: any
+  /**
+dddddddddddd *
+dddddddddddd
+   */
+  error?: string
+}> {
   try {
     // Robust URL construction - handles trailing slashes correctly
     const url = new URL('/record/stop', baseUrl)

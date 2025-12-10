@@ -48,11 +48,7 @@
           :disabled="sensor.isConnected || isConnecting || isRefreshingPorts || !sensor.connectionMode"
         >
           <option v-if="availableSurfacePorts.length === 0" value="">No serial ports detected</option>
-          <option
-            v-for="port in availableSurfacePorts"
-            :key="port.path"
-            :value="port.path"
-          >
+          <option v-for="port in availableSurfacePorts" :key="port.path" :value="port.path">
             {{ formatPortLabel(port) }}
           </option>
         </select>
@@ -115,15 +111,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { useQSensorStore } from '@/stores/qsensor'
 import type { SerialPortInfo } from '@/stores/qsensor'
+import { useQSensorStore } from '@/stores/qsensor'
 import type { QSensorId, QSensorState } from '@/types/qsensor'
+
 import QSensorConnectionModeSelector from './QSensorConnectionModeSelector.vue'
 
 const props = defineProps<{
   // * Sensor identifier this control manages
+  /**
+   *
+   */
   sensorId: QSensorId
   // * Sensor state backing the control
+  /**
+   *
+   */
   sensor: QSensorState
 }>()
 
@@ -158,19 +161,18 @@ const modeLabel = computed(() => {
 
 const modeBadgeClass = computed(() => {
   if (!props.sensor.connectionMode) return ''
-  return props.sensor.connectionMode === 'api'
-    ? 'bg-blue-600/30 text-blue-400'
-    : 'bg-purple-600/30 text-purple-400'
+  return props.sensor.connectionMode === 'api' ? 'bg-blue-600/30 text-blue-400' : 'bg-purple-600/30 text-purple-400'
 })
 
 // Phase 1: Dynamic placeholder based on sensor ID
 const apiUrlPlaceholder = computed(() => {
-  return props.sensorId === 'inWater'
-    ? 'http://blueos.local:9150'
-    : 'http://surfaceref.local:9150'
+  return props.sensorId === 'inWater' ? 'http://blueos.local:9150' : 'http://surfaceref.local:9150'
 })
 
 // Phase 1: Auto-save surface URL on blur
+/**
+ *
+ */
 async function handleApiUrlBlur() {
   if (props.sensorId === 'surface' && props.sensor.connectionMode === 'api') {
     const result = await store.setSurfaceApiUrl(localApiBaseUrl.value)
@@ -181,18 +183,29 @@ async function handleApiUrlBlur() {
 }
 
 // Phase 2: Handle connection mode selection
+/**
+ *
+ * @param mode
+ */
 function handleModeSelected(mode: 'api' | 'serial') {
   console.log(`[QSensorConnectionControl] Connection mode selected: ${mode}`)
   // Store will handle backend type updates
 }
 
 // * Format dropdown label for a port
+/**
+ *
+ * @param port
+ */
 function formatPortLabel(port: SerialPortInfo): string {
   const details = [port.manufacturer, port.serialNumber].filter(Boolean).join(' • ')
   return details ? `${port.path} (${details})` : port.path
 }
 
 // * Refresh available serial ports for surface sensor
+/**
+ *
+ */
 async function handleRefreshPorts(): Promise<void> {
   if (props.sensor.connectionMode !== 'serial') return
   isRefreshingPorts.value = true
@@ -234,6 +247,9 @@ watch(
 )
 
 // * Handle connect button click.
+/**
+ *
+ */
 async function handleConnect(): Promise<void> {
   isConnecting.value = true
 
@@ -265,6 +281,9 @@ async function handleConnect(): Promise<void> {
 }
 
 // * Handle disconnect button click.
+/**
+ *
+ */
 async function handleDisconnect(): Promise<void> {
   isDisconnecting.value = true
 
