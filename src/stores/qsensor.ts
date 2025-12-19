@@ -851,7 +851,8 @@ export const useQSensorStore = defineStore('qsensor', () => {
           cadenceSec.value,
           fullBandwidth.value,
           params.unifiedSessionTimestamp,
-          syncId
+          syncId,
+          sensorId // Pass the sensor ID to create correct directory and metadata
         )
 
         result = mirrorResult

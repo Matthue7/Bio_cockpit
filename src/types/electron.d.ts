@@ -182,7 +182,8 @@ declare global {
         cadenceSec: number,
         fullBandwidth: boolean,
         unifiedSessionTimestamp?: string,
-        syncId?: string
+        syncId?: string,
+        sensorId?: 'inWater' | 'surface'
       ) => Promise<{
         /**
          *

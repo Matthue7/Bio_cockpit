@@ -98,7 +98,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cadenceSec: number,
     fullBandwidth: boolean,
     unifiedSessionTimestamp?: string,
-    syncId?: string
+    syncId?: string,
+    sensorId?: 'inWater' | 'surface'
   ) =>
     ipcRenderer.invoke(
       'qsensor:start-mirror',
@@ -108,7 +109,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       cadenceSec,
       fullBandwidth,
       unifiedSessionTimestamp,
-      syncId
+      syncId,
+      sensorId
     ),
   stopQSensorMirror: (sessionId: string) => ipcRenderer.invoke('qsensor:stop-mirror', sessionId),
   getQSensorStats: (sessionId: string) => ipcRenderer.invoke('qsensor:get-stats', sessionId),

@@ -77,6 +77,10 @@ interface MirrorSession {
    *
    */
   syncId: string | null
+  /**
+   * Sensor identifier ('inWater' or 'surface')
+   */
+  sensorId: 'inWater' | 'surface'
 }
 
 const activeSessions = new Map<string, MirrorSession>()
@@ -455,6 +459,7 @@ async function pollAndMirror(session: MirrorSession): Promise<void> {
  * @param fullBandwidth
  * @param unifiedSessionTimestamp
  * @param syncId
+ * @param sensorId
  */
 export async function startMirrorSession(
   sessionId: string,
@@ -463,7 +468,8 @@ export async function startMirrorSession(
   cadenceSec: number,
   fullBandwidth: boolean,
   unifiedSessionTimestamp?: string,
-  syncId?: string
+  syncId?: string,
+  sensorId?: 'inWater' | 'surface'
 ): Promise<{
   /**
 ))))))))))))) *
@@ -493,8 +499,11 @@ sssssssssssssssssssssss
   syncId?: string
 }> {
   try {
+    // Default to 'inWater' for backwards compatibility if not specified
+    const actualSensorId = sensorId || 'inWater'
+
     console.log(
-      `[QSensor Mirror] startMirrorSession() called: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`
+      `[QSensor Mirror] startMirrorSession() called: session=${sessionId}, sensorId=${actualSensorId}, apiBaseUrl=${apiBaseUrl}, mission=${missionName}, unifiedTimestamp=${unifiedSessionTimestamp}`
     )
 
     // PHASE 3: Validate and normalize URL before starting mirror session
@@ -517,13 +526,13 @@ sssssssssssssssssssssss
     const basePath = customStoragePath || path.join(app.getPath('userData'), 'qsensor')
 
     // NOTE: Use unified session layout if timestamp provided (Phase 4+)
-    // NOTE: Structure: {storage}/{mission}/session_{timestamp}/in-water_{sessionId}/
+    // NOTE: Structure: {storage}/{mission}/session_{timestamp}/{sensor}_{sessionId}/
     // NOTE: Otherwise fall back to legacy: {storage}/{mission}/{sessionId}/
     let rootPath: string
     let unifiedRoot: string | null = null
     if (unifiedSessionTimestamp) {
       unifiedRoot = buildUnifiedSessionRoot(basePath, missionName, unifiedSessionTimestamp)
-      rootPath = path.join(unifiedRoot, buildSensorDirectoryName('inWater', sessionId))
+      rootPath = path.join(unifiedRoot, buildSensorDirectoryName(actualSensorId, sessionId))
     } else {
       rootPath = path.join(basePath, missionName, sessionId)
     }
@@ -542,12 +551,14 @@ sssssssssssssssssssssss
     // * Create sync_metadata.json placeholder in unified session root (Phase 4+)
     if (unifiedRoot && unifiedSessionTimestamp) {
       await ensureSyncMetadata(unifiedRoot, missionName, unifiedSessionTimestamp)
-      await updateSensorMetadata(unifiedRoot, 'inWater', {
+      await updateSensorMetadata(unifiedRoot, actualSensorId, {
         sessionId,
-        directory: buildSensorDirectoryName('inWater', sessionId),
+        directory: buildSensorDirectoryName(actualSensorId, sessionId),
         startedAt: new Date().toISOString(),
       })
-      console.log(`[QSensor Mirror] sync_metadata.json available at ${getSyncMetadataPath(unifiedRoot)}`)
+      console.log(
+        `[QSensor Mirror] sync_metadata.json initialized for ${actualSensorId} at ${getSyncMetadataPath(unifiedRoot)}`
+      )
     }
     console.log(`[QSensor Mirror] Created directory: ${rootPath}`)
 
@@ -573,6 +584,7 @@ sssssssssssssssssssssss
       intervalId: null,
       running: true,
       syncId: sessionSyncId,
+      sensorId: actualSensorId,
     }
 
     activeSessions.set(sessionId, session)
@@ -960,11 +972,18 @@ ssssssssssssssssss
     if (session.sessionRoot) {
       // sessionCsvPath already declared above at line 937
       const relativeCsv = path.relative(session.sessionRoot, sessionCsvPath)
-      await updateSensorMetadata(session.sessionRoot, 'inWater', {
+
+      console.log(
+        `[QSensor Mirror] Updating sync_metadata.json for ${session.sensorId}: sessionCsv=${relativeCsv}, bytesMirrored=${session.bytesMirrored}`
+      )
+
+      await updateSensorMetadata(session.sessionRoot, session.sensorId, {
         stoppedAt: new Date().toISOString(),
         sessionCsv: relativeCsv,
         bytesMirrored: session.bytesMirrored,
       })
+
+      console.log(`[QSensor Mirror] sync_metadata.json updated successfully for ${session.sensorId}`)
 
       // * Check if both sensors are complete and trigger fusion
       await attemptFusion(session.sessionRoot)
@@ -1037,10 +1056,11 @@ export function setupQSensorMirrorService(): void {
       cadenceSec,
       fullBandwidth,
       unifiedSessionTimestamp?,
-      syncId?
+      syncId?,
+      sensorId?: 'inWater' | 'surface'
     ) => {
       console.log(
-        `[QSensor Mirror] IPC start request: session=${sessionId}, apiBaseUrl=${apiBaseUrl}, cadence=${
+        `[QSensor Mirror] IPC start request: session=${sessionId}, sensorId=${sensorId ?? 'inWater'}, apiBaseUrl=${apiBaseUrl}, cadence=${
           fullBandwidth ? 2 : cadenceSec
         }s, fullBandwidth=${fullBandwidth}, unifiedTimestamp=${unifiedSessionTimestamp}, syncId=${syncId ?? 'auto'}`
       )
@@ -1051,7 +1071,8 @@ export function setupQSensorMirrorService(): void {
         cadenceSec,
         fullBandwidth,
         unifiedSessionTimestamp,
-        syncId
+        syncId,
+        sensorId
       )
     }
   )
