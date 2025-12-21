@@ -605,3 +605,416 @@ describe('evaluateRowCreation', () => {
     expect(shouldCreate).toBe(false)
   })
 })
+
+// ============================================================================
+// In-Water-Driven Fusion Functions (for testing)
+// ============================================================================
+
+/**
+ *
+ */
+interface WideFormatRow {
+  /**
+   *
+   */
+  timestamp: string
+  /**
+   *
+   */
+  _parsedTime: number
+  /**
+   *
+   */
+  inwater_value: string | null
+  /**
+   *
+   */
+  surface_value: string | null
+  /**
+   *
+   */
+  surface_timestamp_used: string | null
+  /**
+   *
+   */
+  surface_age_ms: number | null
+  /**
+   *
+   */
+  surface_status: 'fresh' | 'stale' | 'missing' | null
+}
+
+const MAX_SURFACE_STALENESS_MS = 30000
+const SURFACE_STALENESS_WARNING_MS = 10000
+
+/**
+ *
+ * @param inWaterTime
+ * @param surfaceTimestamps
+ * @param surfaceMap
+ * @param stalenessThresholdMs
+ */
+function findSurfaceValueForInWater(
+  inWaterTime: number,
+  surfaceTimestamps: number[],
+  surfaceMap: Map<number, CsvRow>,
+  stalenessThresholdMs: number
+): {
+  /**
+   *
+   */
+  row: CsvRow | null
+  /**
+   *
+   */
+  timestamp_used: number | null
+  /**
+   *
+   */
+  age_ms: number | null
+  /**
+   *
+   */
+  status: 'fresh' | 'stale' | 'missing'
+} {
+  // Binary search for largest surface timestamp <= inWaterTime
+  let left = 0
+  let right = surfaceTimestamps.length - 1
+  let bestIdx = -1
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2)
+    if (surfaceTimestamps[mid] <= inWaterTime) {
+      bestIdx = mid
+      left = mid + 1
+    } else {
+      right = mid - 1
+    }
+  }
+
+  // No surface reading before this in-water time
+  if (bestIdx === -1) {
+    return {
+      row: null,
+      timestamp_used: null,
+      age_ms: null,
+      status: 'missing',
+    }
+  }
+
+  const surfaceTime = surfaceTimestamps[bestIdx]
+  const age = inWaterTime - surfaceTime
+
+  // Check staleness
+  if (age > stalenessThresholdMs) {
+    return {
+      row: null,
+      timestamp_used: surfaceTime,
+      age_ms: age,
+      status: 'stale',
+    }
+  }
+
+  // Determine status: fresh (< 10s) or approaching stale
+  const status: 'fresh' | 'stale' = age < SURFACE_STALENESS_WARNING_MS ? 'fresh' : 'stale'
+
+  return {
+    row: surfaceMap.get(surfaceTime) ?? null,
+    timestamp_used: surfaceTime,
+    age_ms: age,
+    status,
+  }
+}
+
+/**
+ *
+ * @param inWaterMap
+ * @param surfaceMap
+ * @param stalenessThresholdMs
+ */
+function createInWaterDrivenRows(
+  inWaterMap: Map<number, CsvRow>,
+  surfaceMap: Map<number, CsvRow>,
+  stalenessThresholdMs: number = MAX_SURFACE_STALENESS_MS
+): WideFormatRow[] {
+  const rows: WideFormatRow[] = []
+
+  // Sort in-water timestamps (canonical timeline)
+  const inWaterTimestamps = Array.from(inWaterMap.keys()).sort((a, b) => a - b)
+
+  // Sort surface timestamps for binary search
+  const surfaceTimestamps = Array.from(surfaceMap.keys()).sort((a, b) => a - b)
+
+  // For each in-water sample, attach surface value via hold-last
+  for (const inWaterTime of inWaterTimestamps) {
+    const inWaterRow = inWaterMap.get(inWaterTime)!
+
+    // Find best surface value for this in-water time
+    const surfaceInfo = findSurfaceValueForInWater(
+      inWaterTime,
+      surfaceTimestamps,
+      surfaceMap,
+      stalenessThresholdMs
+    )
+
+    // Build simplified wide-format row for testing
+    const row: WideFormatRow = {
+      timestamp: new Date(inWaterTime).toISOString(),
+      _parsedTime: inWaterTime,
+      inwater_value: inWaterRow.value ?? null,
+      surface_value: surfaceInfo.row?.value ?? null,
+      surface_timestamp_used:
+        surfaceInfo.timestamp_used !== null ? new Date(surfaceInfo.timestamp_used).toISOString() : null,
+      surface_age_ms: surfaceInfo.age_ms,
+      surface_status: surfaceInfo.status,
+    }
+
+    rows.push(row)
+  }
+
+  return rows
+}
+
+// ============================================================================
+// Test Suite 4: In-Water-Driven Fusion
+// ============================================================================
+
+describe('createInWaterDrivenRows', () => {
+  it('should create exactly one row per in-water sample', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime, makeRow(baseTime, 'in-water')],
+      [baseTime + 100, makeRow(baseTime + 100, 'in-water')],
+      [baseTime + 200, makeRow(baseTime + 200, 'in-water')],
+    ])
+    const surfaceMap = new Map([[baseTime + 50, makeRow(baseTime + 50, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    expect(rows).toHaveLength(3) // Exactly 3 rows for 3 in-water samples
+    expect(rows.every((r) => r.inwater_value !== null)).toBe(true) // All rows have in-water data
+  })
+
+  it('should attach surface value via hold-last strategy', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime + 50, makeRow(baseTime + 50, 'in-water')],
+      [baseTime + 150, makeRow(baseTime + 150, 'in-water')],
+      [baseTime + 250, makeRow(baseTime + 250, 'in-water')],
+    ])
+    const surfaceMap = new Map([
+      [baseTime, makeRow(baseTime, 'surface', 'SURF_A')],
+      [baseTime + 100, makeRow(baseTime + 100, 'surface', 'SURF_B')],
+      [baseTime + 200, makeRow(baseTime + 200, 'surface', 'SURF_C')],
+    ])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    // First in-water (t=1050) should use surface SURF_A (t=1000)
+    expect(rows[0]._parsedTime).toBe(baseTime + 50)
+    expect(rows[0].surface_age_ms).toBe(50)
+
+    // Second in-water (t=1150) should use surface SURF_B (t=1100)
+    expect(rows[1]._parsedTime).toBe(baseTime + 150)
+    expect(rows[1].surface_age_ms).toBe(50)
+
+    // Third in-water (t=1250) should use surface SURF_C (t=1200)
+    expect(rows[2]._parsedTime).toBe(baseTime + 250)
+    expect(rows[2].surface_age_ms).toBe(50)
+  })
+
+  it('should mark surface as missing when no prior surface reading exists', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime, makeRow(baseTime, 'in-water')],
+      [baseTime + 100, makeRow(baseTime + 100, 'in-water')],
+    ])
+    const surfaceMap = new Map([[baseTime + 150, makeRow(baseTime + 150, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    // First in-water sample (t=1000) has no prior surface → missing
+    expect(rows[0].surface_status).toBe('missing')
+    expect(rows[0].surface_value).toBeNull()
+    expect(rows[0].surface_age_ms).toBeNull()
+
+    // Second in-water sample (t=1100) also before first surface → missing
+    expect(rows[1].surface_status).toBe('missing')
+    expect(rows[1].surface_value).toBeNull()
+  })
+
+  it('should mark surface as stale when age exceeds threshold', () => {
+    const baseTime = 1000
+    const stalenessThreshold = 10000 // 10 seconds
+    const inWaterMap = new Map([
+      [baseTime + 5000, makeRow(baseTime + 5000, 'in-water')], // 5s after surface
+      [baseTime + 15000, makeRow(baseTime + 15000, 'in-water')], // 15s after surface
+    ])
+    const surfaceMap = new Map([[baseTime, makeRow(baseTime, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap, stalenessThreshold)
+
+    // First in-water (age=5s < 10s) → fresh
+    expect(rows[0].surface_status).toBe('fresh')
+    expect(rows[0].surface_value).not.toBeNull()
+    expect(rows[0].surface_age_ms).toBe(5000)
+
+    // Second in-water (age=15s > 10s) → stale
+    expect(rows[1].surface_status).toBe('stale')
+    expect(rows[1].surface_value).toBeNull() // Null when stale
+    expect(rows[1].surface_age_ms).toBe(15000)
+  })
+
+  it('should distinguish fresh vs stale within valid threshold', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime + 5000, makeRow(baseTime + 5000, 'in-water')], // 5s
+      [baseTime + 12000, makeRow(baseTime + 12000, 'in-water')], // 12s
+    ])
+    const surfaceMap = new Map([[baseTime, makeRow(baseTime, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap, 30000) // 30s threshold
+
+    // Age 5s < 10s warning threshold → fresh
+    expect(rows[0].surface_status).toBe('fresh')
+    expect(rows[0].surface_value).not.toBeNull()
+
+    // Age 12s > 10s warning but < 30s staleness → stale (but still valid)
+    expect(rows[1].surface_status).toBe('stale')
+    expect(rows[1].surface_value).not.toBeNull() // Still has value
+  })
+
+  it('should never create surface-only rows', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([[baseTime, makeRow(baseTime, 'in-water')]])
+    const surfaceMap = new Map([
+      [baseTime - 100, makeRow(baseTime - 100, 'surface')],
+      [baseTime + 100, makeRow(baseTime + 100, 'surface')],
+      [baseTime + 200, makeRow(baseTime + 200, 'surface')],
+    ])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    // Only 1 row (matching 1 in-water sample), despite 3 surface samples
+    expect(rows).toHaveLength(1)
+    expect(rows[0].inwater_value).not.toBeNull()
+  })
+
+  it('should handle empty surface map gracefully', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime, makeRow(baseTime, 'in-water')],
+      [baseTime + 100, makeRow(baseTime + 100, 'in-water')],
+    ])
+    const surfaceMap = new Map()
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    expect(rows).toHaveLength(2)
+    expect(rows[0].surface_status).toBe('missing')
+    expect(rows[1].surface_status).toBe('missing')
+    expect(rows[0].surface_value).toBeNull()
+    expect(rows[1].surface_value).toBeNull()
+  })
+
+  it('should handle empty in-water map gracefully', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map()
+    const surfaceMap = new Map([[baseTime, makeRow(baseTime, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    expect(rows).toHaveLength(0) // No rows if no in-water samples
+  })
+
+  it('should maintain monotonic timestamps', () => {
+    const baseTime = 1000
+    const inWaterMap = new Map([
+      [baseTime + 200, makeRow(baseTime + 200, 'in-water')], // Out of order insertion
+      [baseTime, makeRow(baseTime, 'in-water')],
+      [baseTime + 100, makeRow(baseTime + 100, 'in-water')],
+    ])
+    const surfaceMap = new Map([[baseTime + 50, makeRow(baseTime + 50, 'surface')]])
+
+    const rows = createInWaterDrivenRows(inWaterMap, surfaceMap)
+
+    // Verify sorted output despite unsorted input
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i]._parsedTime).toBeGreaterThan(rows[i - 1]._parsedTime)
+    }
+  })
+})
+
+describe('findSurfaceValueForInWater', () => {
+  it('should find most recent surface reading before in-water time', () => {
+    const surfaceMap = new Map([
+      [1000, makeRow(1000, 'surface', 'A')],
+      [1100, makeRow(1100, 'surface', 'B')],
+      [1200, makeRow(1200, 'surface', 'C')],
+    ])
+    const surfaceTimestamps = Array.from(surfaceMap.keys()).sort((a, b) => a - b)
+
+    const result = findSurfaceValueForInWater(1150, surfaceTimestamps, surfaceMap, 30000)
+
+    expect(result.row?.sensor_id).toBe('B') // 1100 is most recent before 1150
+    expect(result.timestamp_used).toBe(1100)
+    expect(result.age_ms).toBe(50)
+    expect(result.status).toBe('fresh')
+  })
+
+  it('should return missing when no surface reading before in-water time', () => {
+    const surfaceMap = new Map([[2000, makeRow(2000, 'surface')]])
+    const surfaceTimestamps = [2000]
+
+    const result = findSurfaceValueForInWater(1500, surfaceTimestamps, surfaceMap, 30000)
+
+    expect(result.row).toBeNull()
+    expect(result.status).toBe('missing')
+    expect(result.timestamp_used).toBeNull()
+  })
+
+  it('should handle exact timestamp match', () => {
+    const surfaceMap = new Map([[1000, makeRow(1000, 'surface')]])
+    const surfaceTimestamps = [1000]
+
+    const result = findSurfaceValueForInWater(1000, surfaceTimestamps, surfaceMap, 30000)
+
+    expect(result.row).not.toBeNull()
+    expect(result.timestamp_used).toBe(1000)
+    expect(result.age_ms).toBe(0)
+    expect(result.status).toBe('fresh')
+  })
+
+  it('should apply staleness threshold correctly', () => {
+    const surfaceMap = new Map([[1000, makeRow(1000, 'surface')]])
+    const surfaceTimestamps = [1000]
+
+    const result = findSurfaceValueForInWater(32000, surfaceTimestamps, surfaceMap, 30000)
+
+    // Age = 31000ms > 30000ms threshold
+    expect(result.row).toBeNull()
+    expect(result.status).toBe('stale')
+    expect(result.age_ms).toBe(31000)
+    expect(result.timestamp_used).toBe(1000) // Still recorded for debugging
+  })
+
+  it('should distinguish fresh (< 10s) from stale (10s-30s)', () => {
+    const surfaceMap = new Map([[1000, makeRow(1000, 'surface')]])
+    const surfaceTimestamps = [1000]
+
+    // Fresh: age = 5s
+    const freshResult = findSurfaceValueForInWater(6000, surfaceTimestamps, surfaceMap, 30000)
+    expect(freshResult.status).toBe('fresh')
+    expect(freshResult.row).not.toBeNull()
+
+    // Stale but valid: age = 15s
+    const staleResult = findSurfaceValueForInWater(16000, surfaceTimestamps, surfaceMap, 30000)
+    expect(staleResult.status).toBe('stale')
+    expect(staleResult.row).not.toBeNull() // Still valid
+
+    // Beyond threshold: age = 35s
+    const expiredResult = findSurfaceValueForInWater(36000, surfaceTimestamps, surfaceMap, 30000)
+    expect(expiredResult.status).toBe('stale')
+    expect(expiredResult.row).toBeNull() // Null when expired
+  })
+})

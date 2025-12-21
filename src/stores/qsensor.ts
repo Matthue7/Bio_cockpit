@@ -1103,37 +1103,54 @@ export const useQSensorStore = defineStore('qsensor', () => {
     let success = false
 
     try {
-      const inWaterResult = await startRecordingSensor('inWater', {
-        mission: params.mission,
-        rateHz: params.rateHz || 500,
-        rollIntervalS: params.rollIntervalS || 60,
-        unifiedSessionTimestamp,
-        syncId,
-      })
-
-      if (!inWaterResult.success) {
-        errors.push(`In-water: ${inWaterResult.error}`)
-      } else {
-        inWaterStarted = true
-        const surfaceResult = await startRecordingSensor('surface', {
+      // Start both sensors in parallel for better time alignment
+      const [inWaterResult, surfaceResult] = await Promise.all([
+        startRecordingSensor('inWater', {
+          mission: params.mission,
+          rateHz: params.rateHz || 500,
+          rollIntervalS: params.rollIntervalS || 60,
+          unifiedSessionTimestamp,
+          syncId,
+        }),
+        startRecordingSensor('surface', {
           mission: params.mission,
           rateHz: params.rateHz || 500, // Use same rate for synchronized sampling
           rollIntervalS: params.rollIntervalS || 60,
           unifiedSessionTimestamp,
           syncId,
         })
+      ])
 
-        if (!surfaceResult.success) {
-          errors.push(`Surface: ${surfaceResult.error}`)
-          console.warn('[QSensor Store] Surface sensor failed to start, rolling back in-water sensor')
+      // Handle results and rollback on any failure
+      if (!inWaterResult.success) {
+        errors.push(`In-water: ${inWaterResult.error}`)
+      }
+      if (!surfaceResult.success) {
+        errors.push(`Surface: ${surfaceResult.error}`)
+      }
+
+      // Rollback successful sensor if other failed
+      if (!inWaterResult.success || !surfaceResult.success) {
+        console.warn('[QSensor Store] One or both sensors failed to start, rolling back')
+        if (inWaterResult.success) {
+          inWaterStarted = true
           const rollbackResult = await stopRecordingSensor('inWater')
           if (!rollbackResult.success) {
             errors.push(`Rollback in-water: ${rollbackResult.error}`)
           }
-        } else {
-          success = true
-          unifiedSessionId.value = `unified-${Date.now()}`
-          console.log(`[QSensor Store] Started both sensors for mission: ${params.mission}`)
+        }
+        if (surfaceResult.success) {
+          const rollbackResult = await stopRecordingSensor('surface')
+          if (!rollbackResult.success) {
+            errors.push(`Rollback surface: ${rollbackResult.error}`)
+          }
+        }
+      } else {
+        // Both started successfully
+        success = true
+        inWaterStarted = true
+        unifiedSessionId.value = `unified-${Date.now()}`
+        console.log(`[QSensor Store] Started both sensors in parallel for mission: ${params.mission}`)
 
           // Phase 3B: Per-sensor time sync measurements
           // This must not block recording - failures are logged but ignored
@@ -1202,7 +1219,6 @@ export const useQSensorStore = defineStore('qsensor', () => {
               console.log('[QSensor Store] Surface sensor backend not configured - no time sync performed')
             }
           }
-        }
       }
     } catch (error: any) {
       errors.push(`Start recording error: ${error.message || 'Unknown error'}`)

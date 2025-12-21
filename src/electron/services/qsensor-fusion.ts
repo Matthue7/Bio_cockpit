@@ -236,6 +236,18 @@ interface WideFormatRow {
    *
    */
   surface_Vin: string | null
+  /**
+   *
+   */
+  surface_timestamp_used: string | null // ISO timestamp of surface reading used
+  /**
+   *
+   */
+  surface_age_ms: number | null // Age in ms (inwater_time - surface_time)
+  /**
+   *
+   */
+  surface_status: 'fresh' | 'stale' | 'missing' | null
 }
 
 // ============================================================================
@@ -243,7 +255,7 @@ interface WideFormatRow {
 // ============================================================================
 
 const WIDE_FORMAT_HEADER =
-  'timestamp,inwater_sensor_id,inwater_mode,inwater_value,inwater_TempC,inwater_Vin,surface_sensor_id,surface_mode,surface_value,surface_TempC,surface_Vin'
+  'timestamp,inwater_sensor_id,inwater_mode,inwater_value,inwater_TempC,inwater_Vin,surface_sensor_id,surface_mode,surface_value,surface_TempC,surface_Vin,surface_timestamp_used,surface_age_ms,surface_status'
 const UNIFIED_CSV_FILENAME = 'unified_session.csv'
 
 // 50ms tolerance accounts for sensor timing jitter, serial transmission delays,
@@ -251,6 +263,18 @@ const UNIFIED_CSV_FILENAME = 'unified_session.csv'
 const ALIGNMENT_TOLERANCE_MS = 50
 
 const DRIFT_THRESHOLD_MS = 2 // Don't model drift if delta < 2ms (just noise)
+
+// Maximum age of surface reading to consider valid (30 seconds)
+const MAX_SURFACE_STALENESS_MS = 30000
+
+// Staleness warning threshold (10 seconds)
+const SURFACE_STALENESS_WARNING_MS = 10000
+
+// Fusion mode: 'consolidated' (current) or 'inwater-driven' (new)
+const FUSION_MODE = (process.env.DEBUG_FUSION_MODE as 'consolidated' | 'inwater-driven') || 'inwater-driven'
+
+// Debug logging flag
+const DEBUG_FUSION_TIMING = process.env.DEBUG_FUSION_TIMING === 'true'
 
 // ============================================================================
 // Main Fusion Function
@@ -337,10 +361,6 @@ export async function fuseSessionData(sessionRoot: string, syncMetadata: SyncMet
     // Log drift model decision
     logDriftModel(driftModel, syncMetadata)
 
-    // Build timestamp axis from both sensors using drift model
-    const timestampAxis = buildConsolidatedTimestampAxis(inWaterData.rows, surfaceData.rows, driftModel)
-    console.log(`[QSensor Fusion] Timestamp axis: ${timestampAxis.length} consolidated timestamps`)
-
     // Build row maps for fast lookup with drift correction
     const inWaterMap = buildRowMapWithDrift(inWaterData.rows, driftModel)
     const surfaceMap = buildRowMap(surfaceData.rows, 0)
@@ -348,8 +368,20 @@ export async function fuseSessionData(sessionRoot: string, syncMetadata: SyncMet
     // Update sync_metadata with markers and drift model
     await updateSyncMetadataWithDriftInfo(sessionRoot, inWaterData.markers, surfaceData.markers, driftModel)
 
-    // Create wide-format aligned rows
-    const wideRows = createWideFormatRows(timestampAxis, inWaterMap, surfaceMap, ALIGNMENT_TOLERANCE_MS)
+    // Create wide-format aligned rows based on fusion mode
+    let wideRows: WideFormatRow[]
+
+    if (FUSION_MODE === 'inwater-driven') {
+      console.log(`[QSensor Fusion] Using in-water-driven fusion mode`)
+      wideRows = createInWaterDrivenRows(inWaterMap, surfaceMap, MAX_SURFACE_STALENESS_MS)
+    } else {
+      console.log(`[QSensor Fusion] Using consolidated timestamp axis fusion mode`)
+      // Build timestamp axis from both sensors using drift model (only for consolidated mode)
+      const timestampAxis = buildConsolidatedTimestampAxis(inWaterData.rows, surfaceData.rows, driftModel)
+      console.log(`[QSensor Fusion] Timestamp axis: ${timestampAxis.length} consolidated timestamps`)
+      wideRows = createWideFormatRows(timestampAxis, inWaterMap, surfaceMap, ALIGNMENT_TOLERANCE_MS)
+    }
+
     console.log(`[QSensor Fusion] Wide-format rows: ${wideRows.length} total`)
 
     // Count rows with data from each sensor and alignment statistics
@@ -1098,6 +1130,174 @@ function evaluateRowCreation(
   return false
 }
 
+// ============================================================================
+// In-Water-Driven Fusion Functions
+// ============================================================================
+
+/**
+ * Find the best surface reading for a given in-water timestamp using hold-last strategy.
+ *
+ * @param inWaterTime - In-water timestamp (ms since epoch)
+ * @param surfaceTimestamps - Sorted array of surface timestamps
+ * @param surfaceMap - Map of surface timestamps to rows
+ * @param stalenessThresholdMs - Maximum age to consider surface value valid
+ * @returns Surface value info with row, timestamp, age, and status
+ */
+function findSurfaceValueForInWater(
+  inWaterTime: number,
+  surfaceTimestamps: number[],
+  surfaceMap: Map<number, CsvRow>,
+  stalenessThresholdMs: number
+): {
+  row: CsvRow | null
+  timestamp_used: number | null
+  age_ms: number | null
+  status: 'fresh' | 'stale' | 'missing'
+} {
+  // Binary search for largest surface timestamp <= inWaterTime
+  let left = 0
+  let right = surfaceTimestamps.length - 1
+  let bestIdx = -1
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2)
+    if (surfaceTimestamps[mid] <= inWaterTime) {
+      bestIdx = mid
+      left = mid + 1
+    } else {
+      right = mid - 1
+    }
+  }
+
+  // No surface reading before this in-water time
+  if (bestIdx === -1) {
+    return {
+      row: null,
+      timestamp_used: null,
+      age_ms: null,
+      status: 'missing'
+    }
+  }
+
+  const surfaceTime = surfaceTimestamps[bestIdx]
+  const age = inWaterTime - surfaceTime
+
+  // Check staleness
+  if (age > stalenessThresholdMs) {
+    if (DEBUG_FUSION_TIMING && age > SURFACE_STALENESS_WARNING_MS) {
+      console.warn(
+        `[QSensor Fusion] Stale surface value: age=${age}ms (threshold=${stalenessThresholdMs}ms)`
+      )
+    }
+    return {
+      row: null,
+      timestamp_used: surfaceTime,
+      age_ms: age,
+      status: 'stale'
+    }
+  }
+
+  // Determine status: fresh (< 10s) or approaching stale
+  const status: 'fresh' | 'stale' =
+    age < SURFACE_STALENESS_WARNING_MS ? 'fresh' : 'stale'
+
+  return {
+    row: surfaceMap.get(surfaceTime) ?? null,
+    timestamp_used: surfaceTime,
+    age_ms: age,
+    status
+  }
+}
+
+/**
+ * Create wide-format rows using in-water-driven fusion strategy.
+ * Emits exactly one row per in-water sample, with surface values attached via hold-last.
+ *
+ * @param inWaterMap - Map of in-water timestamps to rows
+ * @param surfaceMap - Map of surface timestamps to rows
+ * @param stalenessThresholdMs - Maximum surface age to consider valid
+ * @returns Array of wide-format rows (one per in-water sample)
+ */
+function createInWaterDrivenRows(
+  inWaterMap: Map<number, CsvRow>,
+  surfaceMap: Map<number, CsvRow>,
+  stalenessThresholdMs: number = MAX_SURFACE_STALENESS_MS
+): WideFormatRow[] {
+  const rows: WideFormatRow[] = []
+
+  // Sort in-water timestamps (canonical timeline)
+  const inWaterTimestamps = Array.from(inWaterMap.keys()).sort((a, b) => a - b)
+
+  // Sort surface timestamps for binary search
+  const surfaceTimestamps = Array.from(surfaceMap.keys()).sort((a, b) => a - b)
+
+  if (DEBUG_FUSION_TIMING) {
+    console.log(
+      `[QSensor Fusion] In-water-driven fusion: ${inWaterTimestamps.length} in-water samples, ${surfaceTimestamps.length} surface samples`
+    )
+  }
+
+  // Track statistics
+  let freshCount = 0
+  let staleCount = 0
+  let missingCount = 0
+
+  // For each in-water sample, attach surface value via hold-last
+  for (const inWaterTime of inWaterTimestamps) {
+    const inWaterRow = inWaterMap.get(inWaterTime)!
+
+    // Find best surface value for this in-water time
+    const surfaceInfo = findSurfaceValueForInWater(
+      inWaterTime,
+      surfaceTimestamps,
+      surfaceMap,
+      stalenessThresholdMs
+    )
+
+    // Update statistics
+    if (surfaceInfo.status === 'fresh') freshCount++
+    else if (surfaceInfo.status === 'stale') staleCount++
+    else missingCount++
+
+    // Build wide-format row
+    const row: WideFormatRow = {
+      timestamp: new Date(inWaterTime).toISOString(),
+      _parsedTime: inWaterTime,
+
+      // In-water values (always present)
+      inwater_sensor_id: inWaterRow.sensor_id ?? null,
+      inwater_mode: inWaterRow.mode ?? null,
+      inwater_value: inWaterRow.value ?? null,
+      inwater_TempC: inWaterRow.TempC ?? null,
+      inwater_Vin: inWaterRow.Vin ?? null,
+
+      // Surface values (may be null if stale/missing)
+      surface_sensor_id: surfaceInfo.row?.sensor_id ?? null,
+      surface_mode: surfaceInfo.row?.mode ?? null,
+      surface_value: surfaceInfo.row?.value ?? null,
+      surface_TempC: surfaceInfo.row?.TempC ?? null,
+      surface_Vin: surfaceInfo.row?.Vin ?? null,
+
+      // Surface metadata
+      surface_timestamp_used: surfaceInfo.timestamp_used !== null
+        ? new Date(surfaceInfo.timestamp_used).toISOString()
+        : null,
+      surface_age_ms: surfaceInfo.age_ms,
+      surface_status: surfaceInfo.status
+    }
+
+    rows.push(row)
+  }
+
+  if (DEBUG_FUSION_TIMING) {
+    console.log(
+      `[QSensor Fusion] Surface status: fresh=${freshCount}, stale=${staleCount}, missing=${missingCount}`
+    )
+  }
+
+  return rows
+}
+
 // * Write wide-format unified CSV file with atomic write pattern.
 /**
  *
@@ -1123,6 +1323,9 @@ async function writeWideFormatCsv(outputPath: string, rows: WideFormatRow[]): Pr
       row.surface_value ?? '',
       row.surface_TempC ?? '',
       row.surface_Vin ?? '',
+      row.surface_timestamp_used ?? '',
+      row.surface_age_ms !== null ? row.surface_age_ms.toFixed(0) : '',
+      row.surface_status ?? '',
     ].join(',')
     content += csvLine + '\n'
   }
